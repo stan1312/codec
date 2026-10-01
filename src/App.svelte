@@ -12,7 +12,9 @@
     ui_store,
     filter_toggles,
     platform_config_store,
+    trajectories_store,
   } from "./stores/store";
+  import { parseTrajectoryRows } from "./lib/geo";
 
   const mouse_xy = { x: 0, y: 0 };
   const handleMouseMove = throttle((event) => {
@@ -63,6 +65,24 @@
           .then((events) => {
             process_event_sheet_response(events);
           });
+
+        // optional tab with camera trajectories (e.g. produced by tools/colmap_track.py)
+        if (platform_config["Title of tab with trajectories"]) {
+          fetch(
+            `/.netlify/functions/googlesheets?sheet=` +
+              platform_config["Title of tab with trajectories"] +
+              `&offset=` +
+              (platform_config["Rank of trajectories row with column names"] || 1),
+          )
+            .then((rows_string) => rows_string.json())
+            .then((rows) => {
+              const trajectories = parseTrajectoryRows(rows);
+              if (JSON.stringify($trajectories_store) !== JSON.stringify(trajectories)) {
+                $trajectories_store = trajectories;
+              }
+            })
+            .catch((err) => console.log("trajectories tab not loaded", err));
+        }
       });
   }
 
@@ -151,6 +171,18 @@
           );
         }
 
+        // properties for view cones (optional columns)
+        const num_col = (key) => {
+          const col = $platform_config_store[key];
+          if (!col || video[col] === undefined || video[col] === "") return NaN;
+          return parseFloat(String(video[col]).replace(",", "."));
+        };
+        video.bearing = num_col("Title of column used for bearing");
+        video.fov = num_col("Title of column used for field of view");
+        // optional fine sync adjustment in seconds (added to the chronolocation)
+        const offset = num_col("Title of column used for sync offset");
+        video.sync_offset = Number.isFinite(offset) ? offset : 0;
+
         // properties for timeline
         video.type = "range";
         video.label = video.UAR;
@@ -196,6 +228,13 @@
             ];
 
             video.end = video.end_date_time;
+
+            // fine sync adjustment shifts the whole clip
+            if (video.sync_offset) {
+              video.start = new Date(video.start.getTime() + video.sync_offset * 1000);
+              video.end = new Date(video.end + video.sync_offset * 1000);
+              video.end_date_time = video.end;
+            }
           } catch {
             console.log("conversion to datetime failed");
             return;
