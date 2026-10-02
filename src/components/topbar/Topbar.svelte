@@ -4,12 +4,14 @@
   import ModuleTools from "./ModuleTools.svelte";
   import About from "./About.svelte";
   import Logo from "./Logo.svelte";
+  import AddMedia from "./AddMedia.svelte";
 </script>
 
 <div id="top_bar">
   <FilterButton />
   <div class="vl" />
   <ModuleTools />
+  <AddMedia />
   <Finder />
   <About />
   <div class="vl" />

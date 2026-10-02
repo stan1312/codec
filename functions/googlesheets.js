@@ -35,6 +35,12 @@ exports.handler = async (event, context, callback) => {
       };
     } else {
       const list_sheet_index = sheet_ids_by_title[requested_sheet_title];
+      if (list_sheet_index === undefined) {
+        return {
+          statusCode: 404,
+          body: JSON.stringify({ error: "no tab named " + requested_sheet_title }),
+        };
+      }
       //ensure an non empty columns exists after the last filled column in that top row
       let sheet_rows = await doc.sheetsByIndex[list_sheet_index].getRows({
         offset: requested_sheet_offset,

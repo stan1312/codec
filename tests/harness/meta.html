@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><input type="file" id="f" multiple>
+<script type="module">
+import { readerFromFile, readMediaMeta } from "../../src/lib/mediaMeta.js";
+import { mediaRowFromMeta } from "../../src/lib/ingest.js";
+window.go = async () => {
+  const out = [];
+  for (const file of document.getElementById("f").files) {
+    const m = await readMediaMeta(readerFromFile(file));
+    out.push(mediaRowFromMeta(m, { "Capture window start": "2026-06-14 14:00", "Capture window end": "2026-06-15 10:00" }).row);
+  }
+  return out;
+};
+</script>

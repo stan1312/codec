@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Codec sync harness</title>
+<style>
+ body{background:#111;color:#eee;font-family:monospace;margin:10px}
+ #vids{display:flex;gap:8px} .v{position:relative;width:320px}
+ video{width:320px;height:180px;background:#000} .st{position:absolute;top:4px;right:4px;background:#d90c1e;padding:1px 4px}
+ #clock{font-size:28px;margin:8px 0}
+</style></head>
+<body>
+<div id="clock">--</div>
+<div id="vids"></div>
+<script type="module">
+import { attachVideoSync } from "../../src/lib/videoSync.js";
+import { advanceClock, formatClock } from "../../src/lib/sync.js";
+
+const ext = new URLSearchParams(location.search).get("ext") || "webm";
+const D = (h, m, s) => Date.UTC(2025, 9, 2, h, m, 0) + s * 1000;
+const clips = [
+  ["GE0210-T01", D(20, 47, 0)],
+  ["GE0210-T02", D(20, 47, 12.4)],
+  ["GE0210-T03", D(20, 47, 20)],
+];
+const MIN = D(20, 46, 50), MAX = D(20, 48, 0);
+let state = { time: MIN, playing: false, rate: 1, jump: 0 };
+const syncs = [];
+const listeners = [];
+function set(patch) { state = { ...state, ...patch }; listeners.forEach((f) => f(state)); document.getElementById("clock").textContent = formatClock(state.time, 3); }
+let raf = null, last = null;
+function tick(now) {
+  if (!state.playing) { raf = null; last = null; return; }
+  if (last !== null) set(advanceClock(state.time, now - last, state.rate, MIN, MAX));
+  last = now; raf = requestAnimationFrame(tick);
+}
+const api = {
+  play() { set({ playing: true }); if (!raf) { last = null; raf = requestAnimationFrame(tick); } },
+  pause() { set({ playing: false }); },
+  seek(ms) { set({ time: ms, jump: state.jump + 1 }); },
+  rate(r) { set({ rate: r }); },
+  get state() { return state; },
+  report() {
+    return clips.map(([uar, start], i) => {
+      const v = document.getElementById(uar);
+      const target = (state.time - start) / 1000;
+      return { uar, currentTime: v.currentTime, target, err: v.currentTime - target, paused: v.paused, status: syncs[i].status, rate: v.playbackRate };
+    });
+  },
+  clips, D,
+};
+window.api = api;
+for (const [uar, start] of clips) {
+  const wrap = document.createElement("div"); wrap.className = "v";
+  const v = document.createElement("video"); v.id = uar; v.muted = true; v.controls = true; v.preload = "auto";
+  v.src = `media/${uar}.${ext}`;
+  const st = document.createElement("div"); st.className = "st";
+  wrap.append(v, st); document.getElementById("vids").append(wrap);
+  const vs = attachVideoSync(v, start, {
+    onUserSeek: (ms) => api.seek(ms), onUserPlay: () => api.play(), onUserPause: () => api.pause(),
+    onStatus: (s) => (st.textContent = s),
+  });
+  syncs.push(vs);
+  listeners.push((p) => vs.update(p));
+}
+set({});
+</script>
+</body></html>
