@@ -55,7 +55,37 @@ function sheetIO(doc) {
       }
     },
     hasTab: (tab) => !!doc.sheetsByTitle[tab],
+    // show a column as checkboxes (data validation BOOLEAN) from row `fromRow` (1-based) down
+    async setCheckbox(tab, colIndex, fromRow) {
+      const sheet = doc.sheetsByTitle[tab];
+      await doc.axios.post(":batchUpdate", {
+        requests: [
+          {
+            setDataValidation: {
+              range: {
+                sheetId: sheet.sheetId,
+                startRowIndex: fromRow - 1,
+                endRowIndex: sheet.gridProperties.rowCount,
+                startColumnIndex: colIndex,
+                endColumnIndex: colIndex + 1,
+              },
+              rule: { condition: { type: "BOOLEAN" }, strict: false, showCustomUi: true },
+            },
+          },
+        ],
+      });
+    },
   };
+}
+
+// columns created in this call that must be shown as checkboxes
+async function applyCheckboxes(io, table, created, checkboxes) {
+  if (!Array.isArray(checkboxes) || !io.setCheckbox) return;
+  for (const name of checkboxes) {
+    if (!created.includes(name)) continue;
+    const c = table.header.indexOf(name);
+    if (c >= 0) await io.setCheckbox(table.tab, c, table.headerRow + 1);
+  }
 }
 
 // ------------------------------------------------------------- core logic
@@ -76,11 +106,13 @@ async function readTable(io, tab, headerRow) {
 // make sure the header contains `names`; returns writes needed
 function ensureColumns(table, names) {
   const writes = [];
+  writes.created = [];
   for (const n of names) {
     if (!table.header.includes(n)) {
       const c = table.header.length;
       table.header.push(n);
       writes.push({ range: `${q(table.tab)}!${colLetter(c)}${table.headerRow}`, values: [[n]] });
+      writes.created.push(n);
     }
   }
   return writes;
@@ -116,7 +148,9 @@ async function addMedia(io, cfg, body) {
     next++;
   }
   await io.ensureGrid(tab, next, t.header.length);
+  const created = writes.created;
   await io.batchWrite(writes);
+  await applyCheckboxes(io, t, created, body.checkboxes);
   return { added, skipped };
 }
 
@@ -134,7 +168,9 @@ async function updateMedia(io, cfg, body) {
     writes.push({ range: `${q(tab)}!${colLetter(c)}${line}`, values: [[cell(v)]] });
   }
   await io.ensureGrid(tab, line, t.header.length);
+  const created = writes.created;
   await io.batchWrite(writes);
+  await applyCheckboxes(io, t, created, body.checkboxes);
   return { updated: body.uar, row: line };
 }
 

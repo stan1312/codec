@@ -3,6 +3,7 @@
   import Timeline from "./Timeline.svelte";
   import Map from "./Map.svelte";
   import MediumVideo from "./MediumVideo.svelte";
+  import VerifPills from "./VerifPills.svelte";
 
   export let module;
   export let medium;
@@ -41,6 +42,7 @@
     <div class="module_title text_level1">
       {module}
       {module.includes("medi") ? ": " + medium?.UAR : ""}
+      {#if module.includes("medi") && medium}<VerifPills {medium} />{/if}
     </div>
     <div
       class="module_close"
@@ -93,11 +95,8 @@
     min-height: 0;
   }
 
-  .media_module:not(:first-child) {
-    margin-left: var(--grid-size);
-  }
-
-  .timeline_module {
-    margin-right: var(--grid-size);
+  .media_module {
+    flex: 0 0 auto;
+    margin-bottom: 0;
   }
 </style>

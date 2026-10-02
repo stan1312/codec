@@ -23,5 +23,6 @@
   }
   button {
     margin-right: var(--font-size);
+    white-space: nowrap;
   }
 </style>

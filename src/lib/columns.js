@@ -27,3 +27,13 @@ export const INGEST_COLUMNS = {
   originalFile: "Original file",
   sha256: "SHA-256 original",
 };
+
+// verification checkboxes (one per thing to check), shown as pills next to the video title
+export const VERIF_COLUMNS = [
+  { key: "loc", label: "loc", column: "Vérif loc", title: "Géolocalisation vérifiée" },
+  { key: "sync", label: "sync", column: "Vérif sync", title: "Synchronisation vérifiée" },
+  { key: "cone", label: "cône", column: "Vérif cône", title: "Direction / angle du cône vérifiés" },
+];
+
+// all date candidates kept in the sheet, one per line
+export const DATE_CANDIDATES_COLUMN = "Date candidates (auto)";

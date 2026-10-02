@@ -34,8 +34,9 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readerFromPath, readMediaMeta } from "../src/lib/mediaMeta.js";
-import { mediaRowFromMeta, uarFromFileName, captureWindow } from "../src/lib/ingest.js";
+import { mediaRowFromMeta, uarFromFileName, captureWindow, backfillValues } from "../src/lib/ingest.js";
 import { parseLocal, formatLocal, DEFAULT_TZ } from "../src/lib/captureTime.js";
+import { VERIF_COLUMNS } from "../src/lib/columns.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VIDEO_EXT = new Set([".mov", ".mp4", ".m4v", ".3gp"]);
@@ -93,6 +94,23 @@ async function platformConfig(site) {
   const res = await fetch(`${site}/.netlify/functions/googlesheets?sheet=platformconfig&offset=1`);
   if (!res.ok) throw new Error(`cannot read the Platform config (${res.status})`);
   return res.json();
+}
+
+// current media rows of the sheet, by UAR (read through the public read function)
+async function mediaTab(site, cfg) {
+  const tab = cfg["Title of tab with media assets"];
+  const rank = cfg["Rank of assets row with column names"] || "1";
+  const res = await fetch(`${site}/.netlify/functions/googlesheets?sheet=${encodeURIComponent(tab)}&offset=${rank}`);
+  if (!res.ok) return {};
+  const rows = await res.json();
+  if (!Array.isArray(rows)) return {};
+  const header = rows[0] || [];
+  const out = {};
+  for (const r of rows.slice(1)) {
+    const o = Object.fromEntries(header.map((h, i) => [h, r[i]]));
+    if (o.UAR) out[o.UAR] = o;
+  }
+  return out;
 }
 
 const csvCell = (v) => {
@@ -153,8 +171,20 @@ async function main() {
   console.log(`report: ${reportFile}`);
 
   if (!a.dryRun && rows.length) {
-    const res = await api(a.site, key, { action: "add_media", rows });
-    console.log(`sheet: ${res.added.length} added, ${res.skipped.length} already present (not modified)`);
+    const res = await api(a.site, key, { action: "add_media", checkboxes: VERIF_COLUMNS.map((v) => v.column), rows });
+    console.log(`sheet: ${res.added.length} added, ${res.skipped.length} already present`);
+    // already present: fill only their EMPTY informational columns (all date candidates...)
+    if (res.skipped.length) {
+      const existing = await mediaTab(a.site, cfg);
+      for (const uar of res.skipped) {
+        const row = rows.find((r) => r.UAR === uar);
+        const values = backfillValues(row, existing[uar], cfg);
+        if (Object.keys(values).length) {
+          await api(a.site, key, { action: "update_media", uar, values, checkboxes: VERIF_COLUMNS.map((v) => v.column) });
+          console.log(`sheet: ${uar}: completed ${Object.keys(values).length} empty column(s)`);
+        }
+      }
+    }
   }
 
   if (a.proxies) {

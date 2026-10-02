@@ -9,9 +9,10 @@
     sheet_refresh,
   } from "../stores/store";
   import { readerFromFile, readMediaMeta } from "../lib/mediaMeta";
-  import { mediaRowFromMeta, uarFromFileName, captureWindow } from "../lib/ingest";
+  import { mediaRowFromMeta, uarFromFileName, captureWindow, backfillValues } from "../lib/ingest";
   import { formatLocal } from "../lib/captureTime";
   import { sheetWrite } from "../lib/sheetClient";
+  import { VERIF_COLUMNS, DATE_CANDIDATES_COLUMN, INGEST_COLUMNS } from "../lib/columns";
 
   let items = []; // { uar, file, status: "lecture"|"prêt"|"erreur", info, selected }
   let busy = false;
@@ -53,13 +54,39 @@
     busy = true;
     message = "";
     try {
-      const res = await sheetWrite({ action: "add_media", rows });
+      const res = await sheetWrite({ action: "add_media", checkboxes: VERIF_COLUMNS.map((v) => v.column), rows });
       message = `${res.added.length} vidéo(s) ajoutée(s) au sheet` + (res.skipped.length ? `, ${res.skipped.length} déjà présente(s)` : "");
       $sheet_refresh += 1;
     } catch (e) {
       message = "Erreur : " + e.message;
     }
     busy = false;
+  }
+
+  // ---- videos already in the sheet whose date candidates are missing ----
+  $: to_complete = Object.entries($local_file_store).filter(
+    ([uar]) => $media_store[uar] && !String($media_store[uar][DATE_CANDIDATES_COLUMN] ?? "").trim(),
+  );
+  let completing = false;
+  async function complete_existing() {
+    completing = true;
+    message = "";
+    let n = 0;
+    try {
+      for (const [uar, file] of to_complete) {
+        const meta = await readMediaMeta(readerFromFile(file));
+        const info = mediaRowFromMeta(meta, $platform_config_store);
+        const values = backfillValues(info.row, $media_store[uar], $platform_config_store);
+        if (!Object.keys(values).length) continue;
+        await sheetWrite({ action: "update_media", uar, values, checkboxes: VERIF_COLUMNS.map((v) => v.column) });
+        n++;
+      }
+      message = `${n} vidéo(s) complétée(s) (dates candidates et colonnes vides seulement)`;
+      $sheet_refresh += 1;
+    } catch (e) {
+      message = "Erreur : " + e.message;
+    }
+    completing = false;
   }
 
   const win = () => captureWindow($platform_config_store);
@@ -143,6 +170,14 @@
             {busy ? "Écriture…" : `Ajouter au sheet (${items.filter((i) => i.selected && i.info).length})`}
           </button>
           <span class="small">Les lignes existantes du sheet ne sont jamais modifiées.</span>
+        </div>
+      {/if}
+      {#if to_complete.length}
+        <div class="actions">
+          <button disabled={completing} on:click={complete_existing}>
+            {completing ? "Écriture…" : `Compléter les dates de ${to_complete.length} vidéo(s) déjà dans le sheet`}
+          </button>
+          <span class="small">Ajoute toutes les dates trouvées dans le fichier ; ne modifie ni l'heure, ni la position, ni le cône.</span>
         </div>
       {/if}
       {#if message}<p class="message">{message}</p>{/if}

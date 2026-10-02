@@ -4,18 +4,19 @@
 </script>
 
 <div class="media">
-  <!-- add (UAR) means it's a keyed each block, svelte tracks better -->
-  {#each $ui_store.media_in_view as UAR (UAR)}
+  <!-- newest first, stacked vertically -->
+  {#each [...$ui_store.media_in_view].reverse() as UAR (UAR)}
     <Module module={"media"} medium={$media_store[UAR]} />
   {/each}
 </div>
 
 <style>
   .media {
+    flex: 1 1 auto;
     display: flex;
-    flex-flow: row nowrap;
-    align-items: stretch;
-    align-content: stretch;
-    overflow-y: hidden;
+    flex-flow: column nowrap;
+    gap: var(--grid-size);
+    overflow-y: auto;
+    min-height: 0;
   }
 </style>
