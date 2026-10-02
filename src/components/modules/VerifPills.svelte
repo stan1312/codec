@@ -2,7 +2,7 @@
   // Red / green pills: has the location, the sync and the cone of this video been checked?
   // Click to toggle; saved as checkboxes in the sheet ("Vérif loc", "Vérif sync", "Vérif cône").
   import { VERIF_COLUMNS } from "../../lib/columns";
-  import { sheetWrite } from "../../lib/sheetClient";
+  import { sheetWrite, friendlyError } from "../../lib/sheetClient";
   import { sheet_refresh } from "../../stores/store";
   export let medium;
 
@@ -32,7 +32,7 @@
       });
       $sheet_refresh += 1;
     } catch (e) {
-      error = e.message;
+      error = friendlyError(e);
       const { [c.column]: _, ...rest } = pending;
       pending = rest;
     }
