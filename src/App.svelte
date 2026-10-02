@@ -33,70 +33,74 @@
     height_mod_grid = Math.floor(document.body.clientHeight / 10) * 10;
   }, 500);
 
+  // ---- reading the sheet (one call, see functions/sheet-all.js) ----
+  // Google allows 60 reads/minute for the whole platform: poll every 20 s,
+  // not while the tab is hidden, and back off when Google says "quota".
+  const BASE_INTERVAL = 20000;
+  let poll_delay = BASE_INTERVAL;
+  let poll_timer = null;
+  let refresh_timer = null;
+
+  function schedule_poll(delay = poll_delay) {
+    clearTimeout(poll_timer);
+    poll_timer = setTimeout(async () => {
+      if (!document.hidden) {
+        try {
+          await fetch_google_sheet_data();
+          poll_delay = BASE_INTERVAL;
+        } catch (e) {
+          poll_delay = Math.min(poll_delay * 2, 120000);
+          console.log("sheet refresh failed, next try in", poll_delay / 1000, "s", e);
+        }
+      }
+      schedule_poll();
+    }, delay);
+  }
+
   onMount(() => {
-    const fetch_interval = setInterval(fetch_google_sheet_data, 10000);
-    // immediate re-read after the platform wrote to the sheet
+    schedule_poll();
+    // re-read soon after the platform wrote to the sheet (grouped)
     let first = true;
     const unsub = sheet_refresh.subscribe(() => {
       if (first) {
         first = false;
         return;
       }
-      setTimeout(fetch_google_sheet_data, 500);
+      clearTimeout(refresh_timer);
+      refresh_timer = setTimeout(() => schedule_poll(0), 1500);
     });
+    const on_visible = () => {
+      if (!document.hidden) schedule_poll(500);
+    };
+    document.addEventListener("visibilitychange", on_visible);
     return () => {
-      clearInterval(fetch_interval);
+      clearTimeout(poll_timer);
+      clearTimeout(refresh_timer);
       unsub();
+      document.removeEventListener("visibilitychange", on_visible);
     };
   });
 
-  function fetch_google_sheet_data() {
-    return fetch(
-      `/.netlify/functions/googlesheets?sheet=platformconfig&offset=1`,
-    )
-      .then((rows_string) => rows_string.json())
-      .then((platform_config) => {
-        $platform_config_store = platform_config;
-        fetch(
-          `/.netlify/functions/googlesheets?sheet=` +
-            platform_config["Title of tab with media assets"] +
-            `&offset=` +
-            platform_config["Rank of assets row with column names"],
-        )
-          .then((rows_string) => rows_string.json())
-          .then((media) => {
-            process_video_sheet_response(media);
-          });
-
-        fetch(
-          `/.netlify/functions/googlesheets?sheet=` +
-            platform_config["Title of tab with events"] +
-            `&offset=` +
-            platform_config["Rank of events row with column names"],
-        )
-          .then((rows_string) => rows_string.json())
-          .then((events) => {
-            process_event_sheet_response(events);
-          });
-
-        // optional tab with camera trajectories (e.g. produced by tools/colmap_track.py)
-        {
-          fetch(
-            `/.netlify/functions/googlesheets?sheet=` +
-              encodeURIComponent(cfgGet(platform_config, "Title of tab with trajectories")) +
-              `&offset=` +
-              cfgGet(platform_config, "Rank of trajectories row with column names"),
-          )
-            .then((res) => (res.ok ? res.json() : []))
-            .then((rows) => {
-              const trajectories = parseTrajectoryRows(rows);
-              if (JSON.stringify($trajectories_store) !== JSON.stringify(trajectories)) {
-                $trajectories_store = trajectories;
-              }
-            })
-            .catch((err) => console.log("trajectories tab not loaded", err));
-        }
-      });
+  async function fetch_google_sheet_data(attempt = 0) {
+    const res = await fetch(`/.netlify/functions/sheet-all`);
+    if (!res.ok) {
+      // first load: wait and retry a few times instead of showing an error
+      if (attempt < 4 && $platform_config_store["Title of tab with media assets"] === undefined) {
+        await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+        return fetch_google_sheet_data(attempt + 1);
+      }
+      throw new Error(`lecture du sheet impossible (${res.status})`);
+    }
+    const data = await res.json();
+    if (JSON.stringify($platform_config_store) !== JSON.stringify(data.config)) {
+      $platform_config_store = data.config;
+    }
+    if (data.media && data.media.length) process_video_sheet_response(data.media);
+    if (data.events && data.events.length) process_event_sheet_response(data.events);
+    const trajectories = parseTrajectoryRows(data.trajectories || []);
+    if (JSON.stringify($trajectories_store) !== JSON.stringify(trajectories)) {
+      $trajectories_store = trajectories;
+    }
   }
 
   function process_event_sheet_response(rows) {
