@@ -242,6 +242,8 @@
 
             video.end = video.end_date_time;
 
+            // chronolocation as written in the sheet, before the fine adjustment
+            video.start_raw = new Date(video.start.getTime());
             // fine sync adjustment shifts the whole clip
             if (video.sync_offset) {
               video.start = new Date(video.start.getTime() + video.sync_offset * 1000);
