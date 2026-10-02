@@ -54,8 +54,8 @@
     flex-flow: row nowrap;
     align-items: center;
     gap: 4px;
-    padding: 2px 4px 6px 4px;
-    font-size: 12px;
+    padding: 0 4px 3px 4px;
+    font-size: 11px;
   }
 
   button,
@@ -64,8 +64,9 @@
     color: white;
     border: 1px solid #444;
     border-radius: 3px;
-    padding: 2px 6px;
-    font-size: 12px;
+    padding: 0 5px;
+    font-size: 11px;
+    line-height: 16px;
     cursor: pointer;
   }
 
@@ -78,7 +79,7 @@
   .clock {
     margin-left: 8px;
     font-family: monospace;
-    font-size: 14px;
+    font-size: 13px;
     color: white;
   }
 </style>
