@@ -34,6 +34,14 @@ const q = (tab) => `'${String(tab).replace(/'/g, "''")}'`;
 // ------------------------------------------------------------- Sheet IO (real)
 function sheetIO(doc) {
   const enc = (r) => encodeURIComponent(r);
+  // doc.loadInfo() costs a "read request" (Google quota: 60/min): only when needed
+  let infoLoaded = false;
+  const info = async () => {
+    if (!infoLoaded) {
+      await doc.loadInfo();
+      infoLoaded = true;
+    }
+  };
   return {
     async read(tab, a1) {
       const res = await doc.axios.get(`/values/${enc(`${q(tab)}!${a1}`)}`);
@@ -47,6 +55,7 @@ function sheetIO(doc) {
       await doc.axios.post(`/values/${enc(range)}:clear`, {});
     },
     async ensureGrid(tab, rows, cols) {
+      await info();
       const sheet = doc.sheetsByTitle[tab];
       if (!sheet) throw new Error(`no tab named ${tab}`);
       const gp = sheet.gridProperties;
@@ -54,9 +63,13 @@ function sheetIO(doc) {
         await sheet.resize({ rowCount: Math.max(gp.rowCount, rows), columnCount: Math.max(gp.columnCount, cols) });
       }
     },
-    hasTab: (tab) => !!doc.sheetsByTitle[tab],
+    hasTab: async (tab) => {
+      await info();
+      return !!doc.sheetsByTitle[tab];
+    },
     // show a column as checkboxes (data validation BOOLEAN) from row `fromRow` (1-based) down
     async setCheckbox(tab, colIndex, fromRow) {
+      await info();
       const sheet = doc.sheetsByTitle[tab];
       await doc.axios.post(":batchUpdate", {
         requests: [
@@ -76,6 +89,18 @@ function sheetIO(doc) {
       });
     },
   };
+}
+
+// Write; if Google says the range is outside the grid, enlarge the tab and retry.
+async function writeGrow(io, tab, rows, cols, writes) {
+  try {
+    await io.batchWrite(writes);
+  } catch (err) {
+    const msg = err && err.response && err.response.data ? JSON.stringify(err.response.data) : String(err);
+    if (!/exceeds grid limits|grid limits/i.test(msg)) throw err;
+    await io.ensureGrid(tab, rows, cols);
+    await io.batchWrite(writes);
+  }
 }
 
 // columns created in this call that must be shown as checkboxes
@@ -147,9 +172,8 @@ async function addMedia(io, cfg, body) {
     added.push(r.UAR);
     next++;
   }
-  await io.ensureGrid(tab, next, t.header.length);
   const created = writes.created;
-  await io.batchWrite(writes);
+  await writeGrow(io, tab, next, t.header.length, writes);
   await applyCheckboxes(io, t, created, body.checkboxes);
   return { added, skipped };
 }
@@ -167,9 +191,8 @@ async function updateMedia(io, cfg, body) {
     const c = t.header.indexOf(k);
     writes.push({ range: `${q(tab)}!${colLetter(c)}${line}`, values: [[cell(v)]] });
   }
-  await io.ensureGrid(tab, line, t.header.length);
   const created = writes.created;
-  await io.batchWrite(writes);
+  await writeGrow(io, tab, line, t.header.length, writes);
   await applyCheckboxes(io, t, created, body.checkboxes);
   return { updated: body.uar, row: line };
 }
@@ -177,7 +200,7 @@ async function updateMedia(io, cfg, body) {
 async function replaceTrajectory(io, cfg, body) {
   const tab = cfg["Title of tab with trajectories"];
   if (!tab) throw Object.assign(new Error("no 'Title of tab with trajectories' in Platform config"), { status: 400 });
-  if (!io.hasTab(tab)) throw Object.assign(new Error(`create a tab named '${tab}' first`), { status: 400 });
+  if (!(await io.hasTab(tab))) throw Object.assign(new Error(`create a tab named '${tab}' first`), { status: 400 });
   const headerRow = parseInt(cfg["Rank of trajectories row with column names"] || "1", 10) || 1;
   const t = await readTable(io, tab, headerRow);
   const rows = (body.rows || []).map((r) => ({ ...r, UAR: body.uar }));
@@ -190,10 +213,9 @@ async function replaceTrajectory(io, cfg, body) {
   const first = headerRow + 1;
   const last = first + all.length - 1;
   const oldLast = first + t.rows.length - 1;
-  await io.ensureGrid(tab, Math.max(last, oldLast), t.header.length);
   if (oldLast > last) await io.clear(`${q(tab)}!A${last + 1}:${colLetter(t.header.length - 1)}${oldLast}`);
   if (all.length) writes.push({ range: `${q(tab)}!A${first}:${colLetter(t.header.length - 1)}${last}`, values: all });
-  await io.batchWrite(writes);
+  await writeGrow(io, tab, Math.max(last, oldLast), t.header.length, writes);
   return { uar: body.uar, rows: fresh.length, removed: t.rows.length - kept.length };
 }
 
@@ -229,12 +251,12 @@ exports.handler = async (event) => {
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       private_key: process.env.GOOGLE_CLIENT_PRIVATE_KEY.replace(/\\n/gm, "\n"),
     });
-    await doc.loadInfo();
     return json(200, await handle(sheetIO(doc), body));
   } catch (err) {
     console.log({ err });
     const msg = err && err.response && err.response.data ? JSON.stringify(err.response.data) : String(err);
-    return json(err.status || 500, { error: msg });
+    const status = err.status || (err.response && err.response.status === 429 ? 429 : 500);
+    return json(status, { error: msg });
   }
 };
 
