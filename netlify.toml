@@ -12,6 +12,9 @@
 
 [[plugins]]
     package = "netlify-plugin-inline-functions-env"
+    [plugins.inputs]
+    # Keep secrets out of the bundled function source; read them at runtime instead.
+    exclude = ["CODEC_WRITE_KEY"]
 
 [template.environment]
   GOOGLE_SHEET_ID = "your googlesheet document id"
