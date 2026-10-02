@@ -78,8 +78,8 @@
       source: "codec-paths",
       paint: {
         "line-color": "#d90c1e",
-        "line-width": ["case", ["get", "selected"], 3, 1.5],
-        "line-opacity": ["case", ["get", "selected"], 0.9, 0.35],
+        "line-width": ["case", ["get", "selected"], 3.5, 2],
+        "line-opacity": ["case", ["get", "selected"], 1, 0.6],
         "line-dasharray": [2, 1],
       },
     });
@@ -91,20 +91,34 @@
         "fill-color": "#d90c1e",
         "fill-opacity": [
           "case",
-          ["all", ["get", "active"], ["get", "selected"]], 0.4,
-          ["get", "active"], 0.22,
-          0.05,
+          ["all", ["get", "active"], ["get", "selected"]], 0.55,
+          ["get", "active"], 0.38,
+          ["get", "selected"], 0.25,
+          0.14,
         ],
+      },
+    });
+    // dark halo under the outline so the cone stands out on any background
+    mapObj.addLayer({
+      id: "codec-cones-casing",
+      type: "line",
+      source: "codec-cones",
+      layout: { "line-join": "round" },
+      paint: {
+        "line-color": "#000000",
+        "line-width": ["case", ["get", "selected"], 6, 4],
+        "line-opacity": ["case", ["get", "active"], 0.7, 0.4],
       },
     });
     mapObj.addLayer({
       id: "codec-cones-line",
       type: "line",
       source: "codec-cones",
+      layout: { "line-join": "round" },
       paint: {
-        "line-color": "#d90c1e",
-        "line-width": ["case", ["get", "selected"], 2, 1],
-        "line-opacity": ["case", ["get", "active"], 0.9, 0.25],
+        "line-color": "#ff1a2e",
+        "line-width": ["case", ["get", "selected"], 3.5, 2.5],
+        "line-opacity": ["case", ["get", "active"], 1, 0.7],
       },
     });
     layers_ready = true;
