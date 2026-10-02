@@ -29,9 +29,21 @@ function getKey(forceAsk = false) {
   return k;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Short, readable message for the interface (details go to the console).
+export function friendlyError(e) {
+  const m = String((e && e.message) || e || "");
+  if (/429|RESOURCE_EXHAUSTED|quota/i.test(m)) return "Google limite les accès au sheet : réessayez dans une minute";
+  if (/401|403|cl[ée]/i.test(m)) return "clé d'écriture refusée";
+  if (/not found|404/i.test(m)) return "vidéo introuvable dans le sheet";
+  return "échec de l'enregistrement" + (m ? " (" + m.slice(0, 60) + ")" : "");
+}
+
 export async function sheetWrite(body, endpoint = "/.netlify/functions/sheet-write") {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const key = getKey(attempt > 0);
+  let askedAgain = false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const key = getKey(askedAgain);
     if (!key) throw new Error("écriture annulée (pas de clé)");
     const res = await fetch(endpoint, {
       method: "POST",
@@ -44,13 +56,24 @@ export async function sheetWrite(body, endpoint = "/.netlify/functions/sheet-wri
     } catch {
       /* empty body */
     }
-    if (res.status === 401) {
+    if (res.status === 401 && !askedAgain) {
       storeKey("");
       sessionKey = "";
-      continue; // ask again
+      askedAgain = true;
+      continue; // ask the key again once
     }
-    if (!res.ok) throw new Error(data.error || `erreur ${res.status}`);
+    const msg = data.error || `erreur ${res.status}`;
+    // Google read quota: wait and retry (5 s, 10 s, 20 s, 40 s)
+    if (res.status === 429 || /RESOURCE_EXHAUSTED|RATE_LIMIT/.test(msg)) {
+      console.log("sheet quota, retrying", msg);
+      await sleep(5000 * Math.pow(2, attempt));
+      continue;
+    }
+    if (!res.ok) {
+      console.log("sheet write error", msg);
+      throw new Error(msg);
+    }
     return data;
   }
-  throw new Error("clé d'écriture refusée");
+  throw new Error("429 quota");
 }
