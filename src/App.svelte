@@ -6,13 +6,18 @@
   import Tooltip from "./components/Tooltip.svelte";
   import Modules from "./components/modules/Modules.svelte";
   import FilterPanel from "./components/modules/FilterPanel.svelte";
+  import IngestPanel from "./components/IngestPanel.svelte";
   import {
     media_store,
     events_store,
     ui_store,
     filter_toggles,
     platform_config_store,
+    trajectories_store,
+    sheet_refresh,
   } from "./stores/store";
+  import { parseTrajectoryRows } from "./lib/geo";
+  import { cfgGet } from "./lib/columns";
 
   const mouse_xy = { x: 0, y: 0 };
   const handleMouseMove = throttle((event) => {
@@ -30,8 +35,18 @@
 
   onMount(() => {
     const fetch_interval = setInterval(fetch_google_sheet_data, 10000);
+    // immediate re-read after the platform wrote to the sheet
+    let first = true;
+    const unsub = sheet_refresh.subscribe(() => {
+      if (first) {
+        first = false;
+        return;
+      }
+      setTimeout(fetch_google_sheet_data, 500);
+    });
     return () => {
       clearInterval(fetch_interval);
+      unsub();
     };
   });
 
@@ -63,6 +78,24 @@
           .then((events) => {
             process_event_sheet_response(events);
           });
+
+        // optional tab with camera trajectories (e.g. produced by tools/colmap_track.py)
+        {
+          fetch(
+            `/.netlify/functions/googlesheets?sheet=` +
+              encodeURIComponent(cfgGet(platform_config, "Title of tab with trajectories")) +
+              `&offset=` +
+              cfgGet(platform_config, "Rank of trajectories row with column names"),
+          )
+            .then((res) => (res.ok ? res.json() : []))
+            .then((rows) => {
+              const trajectories = parseTrajectoryRows(rows);
+              if (JSON.stringify($trajectories_store) !== JSON.stringify(trajectories)) {
+                $trajectories_store = trajectories;
+              }
+            })
+            .catch((err) => console.log("trajectories tab not loaded", err));
+        }
       });
   }
 
@@ -151,6 +184,18 @@
           );
         }
 
+        // properties for view cones (optional columns)
+        const num_col = (key) => {
+          const col = cfgGet($platform_config_store, key);
+          if (!col || video[col] === undefined || video[col] === "") return NaN;
+          return parseFloat(String(video[col]).replace(",", "."));
+        };
+        video.bearing = num_col("Title of column used for bearing");
+        video.fov = num_col("Title of column used for field of view");
+        // optional fine sync adjustment in seconds (added to the chronolocation)
+        const offset = num_col("Title of column used for sync offset");
+        video.sync_offset = Number.isFinite(offset) ? offset : 0;
+
         // properties for timeline
         video.type = "range";
         video.label = video.UAR;
@@ -196,6 +241,13 @@
             ];
 
             video.end = video.end_date_time;
+
+            // fine sync adjustment shifts the whole clip
+            if (video.sync_offset) {
+              video.start = new Date(video.start.getTime() + video.sync_offset * 1000);
+              video.end = new Date(video.end + video.sync_offset * 1000);
+              video.end_date_time = video.end;
+            }
           } catch {
             console.log("conversion to datetime failed");
             return;
@@ -250,6 +302,7 @@
 </svelte:head>
 
 <FilterPanel />
+<IngestPanel />
 <Tooltip {mouse_xy} />
 
 <main

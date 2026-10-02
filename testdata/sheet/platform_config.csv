@@ -1,0 +1,26 @@
+Setting,Value
+Map start latitude,46.2085
+Map start longitude,6.1490
+Map start zoom,17
+Timeline begin datetime,2025-10-02 20:46:50
+Timeline end datetime,2025-10-02 20:48:00
+Source of media files,local
+Title of tab with media assets,media assets
+Title of tab with events,events
+Title of column used for chronolocation,Chronolocation (YYYY-MM-DD HH:MM:SS)
+Title of column used for duration,Asset duration (HH:MM:SS)
+Title of column used for latitude,Latitude (decimal)
+Title of column used for longitude,Longitude (decimal)
+Title of column used for url,URL
+Rank of assets row with column names,1
+Rank of events row with column names,1
+Title of column used for bearing,Bearing (deg)
+Title of column used for field of view,FOV (deg)
+Title of column used for sync offset,Sync offset (s)
+Title of tab with trajectories,trajectories
+Rank of trajectories row with column names,1
+Cone length (m),40
+Default field of view (deg),60
+Capture window start,2026-06-14 14:00
+Capture window end,2026-06-15 10:00
+Time zone,Europe/Zurich

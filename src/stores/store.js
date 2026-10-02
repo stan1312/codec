@@ -49,3 +49,25 @@ export const media_store_filtered = derived(
     return Object.fromEntries(filtered_media);
   },
 );
+
+// ---- Synchronised playback (fork Genève) ----
+// time: master time in ms (same space as medium.start), playing, rate
+export const playback_store = writable({
+  time: NaN,
+  playing: false,
+  rate: 1,
+  // incremented whenever the time is set by hand (drag, click, seek), so
+  // videos know they must hard-seek instead of smoothly correcting
+  jump: 0,
+});
+
+// { UAR: [{ t, lat, lon, bearing }, ...] } sorted by t (seconds into the video)
+export const trajectories_store = writable({});
+
+// ---- automatic ingest & sheet writes (fork Genève) ----
+// open the "new videos" panel
+export const ingest_open = writable(false);
+// increment to ask App to re-read the sheet immediately
+export const sheet_refresh = writable(0);
+// local, optimistic edits not yet visible in the sheet: { UAR: {bearing, fov, lat, long} }
+export const local_overrides = writable({});

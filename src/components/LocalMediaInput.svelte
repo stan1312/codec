@@ -1,5 +1,6 @@
 <script>
-  import { local_file_store } from "../stores/store";
+  import { local_file_store, media_store, ingest_open } from "../stores/store";
+  import { uarFromFileName } from "../lib/ingest";
 
   let input_container, media_input;
 
@@ -10,15 +11,15 @@
 
     // for each media file selected, add it to the media_files object with its code as key
     media_files_array.forEach((media) => {
-      // find the file extension location in the filename string
-      let period_index = media.name.indexOf(".");
-      // cut out the file extension
-      let media_code = media.name.slice(0, period_index);
+      // UAR = file name up to the first "."
+      let media_code = uarFromFileName(media.name);
       // add the media file into the media_files object
       $local_file_store[media_code] = media;
     });
     // when done, remove the input html element from the page
     input_container.remove();
+    // files without a row in the sheet -> propose to add them
+    if (Object.keys($local_file_store).some((uar) => !$media_store[uar])) $ingest_open = true;
   }
 
   function onInputBypassClick() {

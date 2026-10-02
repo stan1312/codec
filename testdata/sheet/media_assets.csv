@@ -1,0 +1,4 @@
+UAR,Chronolocation (YYYY-MM-DD HH:MM:SS),Asset duration (HH:MM:SS),Latitude (decimal),Longitude (decimal),Bearing (deg),FOV (deg),Sync offset (s),URL,lacrymo
+GE0210-T01,2025-10-02 20:47:00,00:00:30,46.20862,6.14880,140,65,0,,TRUE
+GE0210-T02,2025-10-02 20:47:12,00:00:25,46.20830,6.14950,300,,0.4,,FALSE
+GE0210-T03,2025-10-02 20:47:20,00:00:20,46.20810,6.14890,20,55,0,,TRUE

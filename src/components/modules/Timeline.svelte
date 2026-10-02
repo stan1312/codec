@@ -4,7 +4,10 @@
     events_store,
     ui_store,
     platform_config_store,
+    playback_store,
   } from "../../stores/store";
+  import { seekTo, setClockBounds } from "../../lib/clock";
+  import Transport from "./Transport.svelte";
   import { DataSet, DataView, Timeline, moment } from "vis-timeline/standalone";
   // import "vis-timeline/styles/vis-timeline-graph2d.css";
 
@@ -19,6 +22,22 @@
     timeEnd = localtoUTCdatetimeobj(
       new Date($platform_config_store["Timeline end datetime"]),
     );
+    setClockBounds(timeBegin.getTime(), timeEnd.getTime());
+  }
+
+  // ---- playhead: follows the master clock ----
+  let dragging_playhead = false;
+  $: if (main_timeline && Number.isFinite($playback_store.time) && !dragging_playhead) {
+    main_timeline.setCustomTime(new Date($playback_store.time), "playhead");
+    // keep the playhead in view while playing
+    if ($playback_store.playing) {
+      const w = main_timeline.getWindow();
+      const t = $playback_store.time;
+      const span = w.end - w.start;
+      if (t > w.end.getTime() - span * 0.05 || t < w.start.getTime()) {
+        main_timeline.moveTo(new Date(t + span * 0.4), { animation: false });
+      }
+    }
   }
 
   function update_timeline_clicked_hovered() {
@@ -99,7 +118,7 @@
     let copy_custom_times = main_timeline?.customTimes.slice(0);
     copy_custom_times?.forEach((custom_time) => {
       let id = custom_time.options.id;
-      if (!id.includes("current_time_line")) main_timeline.removeCustomTime(id);
+      if (id !== "playhead") main_timeline.removeCustomTime(id);
     });
     $events_store.forEach((el) => {
       main_timeline?.addCustomTime(el.start, el.id);
@@ -184,16 +203,25 @@
       );
     });
 
-    // add event listener for when timeline is dragged or zoomed
-    main_timeline.on("rangechange", function (properties) {
-      updateCurrentTimeToMatchTimeline(properties);
-    });
-
-    // add current time line
+    // draggable playhead driving the master clock
     main_timeline.addCustomTime(
-      timeBegin.getTime() / 2 + timeEnd.getTime() / 2,
-      "current_time_line",
+      Number.isFinite($playback_store.time) ? new Date($playback_store.time) : timeBegin,
+      "playhead",
     );
+    main_timeline.on("timechange", (properties) => {
+      if (properties.id !== "playhead") return;
+      dragging_playhead = true;
+      seekTo(properties.time.getTime());
+    });
+    main_timeline.on("timechanged", (properties) => {
+      if (properties.id !== "playhead") return;
+      dragging_playhead = false;
+      seekTo(properties.time.getTime());
+    });
+    // double-click on an empty part of the timeline moves the playhead there
+    main_timeline.on("doubleClick", (properties) => {
+      if (!properties.item && properties.time) seekTo(properties.time.getTime());
+    });
 
     main_timeline.on("mouseOver", (properties) => {
       if (properties.customTime !== null) {
@@ -204,7 +232,7 @@
         // optional custom time marker changes
         try {
           document.getElementsByClassName(
-            "current_time_line",
+            "playhead",
           )[0].style.display = "block";
         } catch (error) {
           console.log(error);
@@ -212,23 +240,6 @@
       }
     });
   });
-
-  function updateCurrentTimeToMatchTimeline(properties) {
-    let current_time = new Date(
-      (properties.start.getTime() + properties.end.getTime()) / 2,
-    );
-    // make sure offset from utc is accounted for
-    // current_time.setHours(
-    //   current_time.getHours() -
-    //     utcstring2int($platform_config_store["Local GMT offset ([+-]HH:MM)"])
-    // );
-    main_timeline.removeCustomTime("current_time_line");
-    main_timeline.addCustomTime(current_time, "current_time_line");
-
-    let current_time_line =
-      main_timeline.customTimes[main_timeline.customTimes.length - 1];
-    current_time_line.hammer.off("panstart panmove panend");
-  }
 
   function date2month_day(date) {
     const dateOptions = {
@@ -257,7 +268,7 @@
     let element = document.getElementById("hover_box");
     let id = properties.customTime.split(" ")[0];
     let text = document.getElementById("eventDescription");
-    if (properties.customTime !== "current_time_line") {
+    if (properties.customTime !== "playhead") {
       element.style.display = "block";
       text.innerHTML = $events_store[id].description;
     }
@@ -272,6 +283,7 @@
 </script>
 
 <div id="timeline_container">
+  <Transport />
   <style>
     .vis-panel.vis-bottom,
     .vis-panel.vis-center,
@@ -341,10 +353,11 @@
         opacity: 0.2;
       }
 
-      .vis-custom-time.current_time_line {
+      .vis-custom-time.playhead {
         background-color: #d90c1e;
-        width: 5px;
-        opacity: 0.5;
+        width: 3px;
+        opacity: 0.9;
+        cursor: ew-resize;
       }
 
       .triangle-up {
@@ -373,7 +386,8 @@
 
   #main_timeline {
     width: 100%;
-    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   #hover_box {
