@@ -67,6 +67,10 @@ function sheetIO(doc) {
       await info();
       return !!doc.sheetsByTitle[tab];
     },
+    async createTab(tab, header) {
+      await info();
+      await doc.addSheet({ title: tab, headerValues: header });
+    },
     // show a column as checkboxes (data validation BOOLEAN) from row `fromRow` (1-based) down
     async setCheckbox(tab, colIndex, fromRow) {
       await info();
@@ -200,7 +204,10 @@ async function updateMedia(io, cfg, body) {
 async function replaceTrajectory(io, cfg, body) {
   const tab = cfg["Title of tab with trajectories"];
   if (!tab) throw Object.assign(new Error("no 'Title of tab with trajectories' in Platform config"), { status: 400 });
-  if (!(await io.hasTab(tab))) throw Object.assign(new Error(`create a tab named '${tab}' first`), { status: 400 });
+  if (!(await io.hasTab(tab))) {
+    if (!io.createTab) throw Object.assign(new Error(`create a tab named '${tab}' first`), { status: 400 });
+    await io.createTab(tab, ["UAR", "t", "x", "y", "heading_rel", "quality"]);
+  }
   const headerRow = parseInt(cfg["Rank of trajectories row with column names"] || "1", 10) || 1;
   const t = await readTable(io, tab, headerRow);
   const rows = (body.rows || []).map((r) => ({ ...r, UAR: body.uar }));
