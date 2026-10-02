@@ -14,7 +14,7 @@
   import { conePolygon } from "../../lib/geo";
   import { computePoses, pathOf, originOf, bearingFromClick, positionFromClick } from "../../lib/poses";
   import { cfgGet } from "../../lib/columns";
-  import { sheetWrite } from "../../lib/sheetClient";
+  import { sheetWrite, friendlyError } from "../../lib/sheetClient";
   const { NavigationControl, ScaleControl } = controls;
 
   let zoom, mapComponent;
@@ -78,7 +78,7 @@
       source: "codec-paths",
       paint: {
         "line-color": "#d90c1e",
-        "line-width": ["case", ["get", "selected"], 3.5, 2],
+        "line-width": ["case", ["get", "selected"], 1.5, 1],
         "line-opacity": ["case", ["get", "selected"], 1, 0.6],
         "line-dasharray": [2, 1],
       },
@@ -98,18 +98,6 @@
         ],
       },
     });
-    // dark halo under the outline so the cone stands out on any background
-    mapObj.addLayer({
-      id: "codec-cones-casing",
-      type: "line",
-      source: "codec-cones",
-      layout: { "line-join": "round" },
-      paint: {
-        "line-color": "#000000",
-        "line-width": ["case", ["get", "selected"], 6, 4],
-        "line-opacity": ["case", ["get", "active"], 0.7, 0.4],
-      },
-    });
     mapObj.addLayer({
       id: "codec-cones-line",
       type: "line",
@@ -117,8 +105,8 @@
       layout: { "line-join": "round" },
       paint: {
         "line-color": "#ff1a2e",
-        "line-width": ["case", ["get", "selected"], 3.5, 2.5],
-        "line-opacity": ["case", ["get", "active"], 1, 0.7],
+        "line-width": ["case", ["get", "selected"], 1.2, 0.8],
+        "line-opacity": ["case", ["get", "active"], 1, 0.6],
       },
     });
     layers_ready = true;
@@ -177,7 +165,7 @@
       save_state = "enregistré dans le sheet";
       $sheet_refresh += 1;
     } catch (e) {
-      save_state = "erreur : " + e.message;
+      save_state = friendlyError(e);
     }
   }
 
@@ -304,8 +292,8 @@
           visibility: hidden;
         }
       </style>
-      <NavigationControl />
-      <ScaleControl />
+      <NavigationControl position="bottom-left" />
+      <ScaleControl position="bottom-left" />
       <!-- {#each Object.values($media_store_filtered) as medium} -->
       {#each Object.values($media_store_filtered).filter((video) => poses[video.UAR]) as medium (medium.UAR)}
         <span>
@@ -382,5 +370,6 @@
   .ce_state {
     color: #ccc;
     font-size: 11px;
+    overflow-wrap: anywhere;
   }
 </style>
