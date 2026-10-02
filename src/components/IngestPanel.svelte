@@ -11,7 +11,7 @@
   import { readerFromFile, readMediaMeta } from "../lib/mediaMeta";
   import { mediaRowFromMeta, uarFromFileName, captureWindow, backfillValues } from "../lib/ingest";
   import { formatLocal } from "../lib/captureTime";
-  import { sheetWrite } from "../lib/sheetClient";
+  import { sheetWrite, friendlyError } from "../lib/sheetClient";
   import { VERIF_COLUMNS, DATE_CANDIDATES_COLUMN, INGEST_COLUMNS } from "../lib/columns";
 
   let items = []; // { uar, file, status: "lecture"|"prêt"|"erreur", info, selected }
@@ -58,7 +58,7 @@
       message = `${res.added.length} vidéo(s) ajoutée(s) au sheet` + (res.skipped.length ? `, ${res.skipped.length} déjà présente(s)` : "");
       $sheet_refresh += 1;
     } catch (e) {
-      message = "Erreur : " + e.message;
+      message = "Erreur : " + friendlyError(e);
     }
     busy = false;
   }
@@ -84,7 +84,7 @@
       message = `${n} vidéo(s) complétée(s) (dates candidates et colonnes vides seulement)`;
       $sheet_refresh += 1;
     } catch (e) {
-      message = "Erreur : " + e.message;
+      message = "Erreur : " + friendlyError(e);
     }
     completing = false;
   }

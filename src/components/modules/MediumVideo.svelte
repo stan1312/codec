@@ -7,7 +7,7 @@
   } from "../../stores/store";
   import { attachVideoSync } from "../../lib/videoSync";
   import { play, pause, seekTo } from "../../lib/clock";
-  import { sheetWrite } from "../../lib/sheetClient";
+  import { sheetWrite, friendlyError } from "../../lib/sheetClient";
   import { cfgGet } from "../../lib/columns";
   import { sheet_refresh } from "../../stores/store";
   export let medium;
@@ -79,7 +79,7 @@
         save_msg = "enregistré";
         $sheet_refresh += 1;
       } catch (e) {
-        save_msg = "erreur : " + e.message;
+        save_msg = friendlyError(e);
       }
     }, 600);
   }
