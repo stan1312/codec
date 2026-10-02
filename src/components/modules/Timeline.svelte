@@ -149,8 +149,8 @@
       max: timeEnd, // set the timeline max time (i.e. can't scroll past)
       showMajorLabels: false,
       margin: {
-        axis: 5, // space around the axis
-        item: 4, // space around each item
+        axis: 2, // space around the axis
+        item: { horizontal: 2, vertical: 2 }, // space around each item
       },
       orientation: {
         item: "top",
@@ -319,7 +319,9 @@
       }
 
       #main_timeline .vis-item {
-        height: 40px;
+        height: 14px;
+        line-height: 12px;
+        font-size: 10px;
       }
 
       .vis-item.vis-selected {
@@ -330,10 +332,17 @@
 
       #main_timeline .vis-item.vis-range {
         border-style: solid;
-        border-radius: 3px;
+        border-radius: 2px;
         box-sizing: border-box;
         border-color: white;
-        border-width: 3px;
+        border-width: 1px;
+      }
+      #main_timeline .vis-item .vis-item-content {
+        padding: 0 3px;
+      }
+      #main_timeline .vis-time-axis .vis-text {
+        font-size: 10px;
+        padding: 1px 3px;
       }
 
       .vis-item.clicked {
