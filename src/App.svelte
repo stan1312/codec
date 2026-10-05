@@ -18,6 +18,7 @@
   } from "./stores/store";
   import { parseTrajectoryRows } from "./lib/geo";
   import { cfgGet } from "./lib/columns";
+  import { resolveOffset } from "./lib/syncEdit";
 
   const mouse_xy = { x: 0, y: 0 };
   const handleMouseMove = throttle((event) => {
@@ -198,7 +199,8 @@
         video.fov = num_col("Title of column used for field of view");
         // optional fine sync adjustment in seconds (added to the chronolocation)
         const offset = num_col("Title of column used for sync offset");
-        video.sync_offset = Number.isFinite(offset) ? offset : 0;
+        // an offset just set on the platform wins until the sheet shows it
+        video.sync_offset = resolveOffset(video.UAR, Number.isFinite(offset) ? offset : 0);
 
         // properties for timeline
         video.type = "range";

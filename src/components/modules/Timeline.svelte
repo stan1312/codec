@@ -7,6 +7,8 @@
     playback_store,
   } from "../../stores/store";
   import { seekTo, setClockBounds } from "../../lib/clock";
+  import { setStartTime, drag_unlocked, drag_info, hasChrono } from "../../lib/syncEdit";
+  import { waveforms, waves_on } from "../../lib/waveforms";
   import Transport from "./Transport.svelte";
   import { DataSet, DataView, Timeline, moment } from "vis-timeline/standalone";
   // import "vis-timeline/styles/vis-timeline-graph2d.css";
@@ -106,11 +108,54 @@
   $: {
     videos = Object.values($media_store_filtered);
     let videos_w_chrono = videos.filter((video) => video.start !== undefined);
-    items = new DataSet(videos_w_chrono);
+    // waveform drawn inside the bar (toggle "ondes")
+    const wf = $waveforms;
+    const show_waves = $waves_on;
+    items = new DataSet(
+      videos_w_chrono.map((v) => {
+        const w = show_waves && wf[v.UAR] && wf[v.UAR].url;
+        return w
+          ? {
+              ...v,
+              style: `background-image:url(${w});background-size:100% 100%;background-repeat:no-repeat;`,
+            }
+          : v;
+      }),
+    );
     let view = new DataView(items);
     let viewed_items = view.get();
     main_timeline?.setItems(viewed_items);
     update_timeline_clicked_hovered();
+  }
+
+  // ---- drag a video along the timeline to re-synchronise it ----
+  $: main_timeline?.setOptions({
+    editable: $drag_unlocked
+      ? { updateTime: true, updateGroup: false, add: false, remove: false, overrideItems: false }
+      : false,
+    itemsAlwaysDraggable: { item: $drag_unlocked, range: $drag_unlocked },
+  });
+  $: if (main_timeline) {
+    $waves_on;
+    setTimeout(() => main_timeline?.redraw(), 0);
+  }
+
+  // while dragging: keep the duration, show the new start time
+  function on_moving(item, callback) {
+    const m = $media_store_filtered[item.id];
+    if (!hasChrono(m)) return callback(null);
+    const dur = new Date(m.end).getTime() - m.start.getTime();
+    const start = new Date(item.start).getTime();
+    item.end = new Date(start + dur);
+    $drag_info = { uar: item.id, start, offset: (start - m.start_raw.getTime()) / 1000 };
+    callback(item);
+  }
+  // drop: cancel vis-timeline's own move and apply ours (saved to the sheet)
+  function on_move(item, callback) {
+    const start = new Date(item.start).getTime();
+    callback(null);
+    setStartTime(item.id, start);
+    setTimeout(() => ($drag_info = null), 1500);
   }
 
   // update when events_store changes
@@ -156,6 +201,10 @@
         item: "top",
       },
       showCurrentTime: false, // don't show red bar showing current time
+      snap: null, // free positioning when dragging videos (ms precision)
+      editable: false,
+      onMoving: on_moving,
+      onMove: on_move,
       order: (video_a, video_b) => {
         // determines how items will be stacked and ordered
         return video_a.start - video_b.start;
@@ -294,6 +343,8 @@
   <div
     bind:this={container}
     id="main_timeline"
+    class:waves={$waves_on}
+    class:unlocked={$drag_unlocked}
     on:mouseout={() => {
       document.getElementById("hover_box").style.display = "none";
     }}
@@ -322,6 +373,18 @@
         height: 14px;
         line-height: 12px;
         font-size: 10px;
+      }
+
+      #main_timeline.waves .vis-item {
+        height: 30px;
+        line-height: 12px;
+      }
+      #main_timeline.waves .vis-item .vis-item-content {
+        text-shadow: 0 0 2px white, 0 0 2px white;
+      }
+      #main_timeline.unlocked .vis-item.vis-range {
+        cursor: grab;
+        border-style: dashed;
       }
 
       .vis-item.vis-selected {

@@ -3,7 +3,9 @@
   // (slightly transparent) and the videos float on the right (scrollable).
   import Module from "./Module.svelte";
   import Media from "./Media.svelte";
+  import SyncPanel from "./SyncPanel.svelte";
   import { ui_store } from "../../stores/store";
+  import { sync_panel_open } from "../../lib/syncEdit";
 
   $: show = (m) => $ui_store.modules_in_view.includes(m);
 </script>
@@ -16,6 +18,9 @@
   <div id="map_area"><Module module={"map"} /></div>
   <div id="media_area"><Media /></div>
   <div id="timeline_area"><Module module={"timeline"} /></div>
+  {#if $sync_panel_open}
+    <div id="sync_area"><SyncPanel /></div>
+  {/if}
 </div>
 
 <style>
@@ -86,6 +91,20 @@
   #modules_container.no_timeline #map_area :global(.mapboxgl-ctrl-bottom-left),
   #modules_container.no_timeline #map_area :global(.mapboxgl-ctrl-bottom-right) {
     bottom: 0;
+  }
+
+  /* "synchroniser 2 vidéos", above the timeline, left of the videos */
+  #sync_area {
+    position: absolute;
+    z-index: 8;
+    left: var(--gap);
+    bottom: calc(var(--timeline-h) + 2 * var(--gap));
+    width: min(calc(100% - min(33%, 560px) - 4 * var(--gap)), 980px);
+    max-height: calc(100% - var(--timeline-h) - 4 * var(--gap));
+    overflow-y: auto;
+  }
+  #modules_container.no_media #sync_area {
+    width: min(calc(100% - 2 * var(--gap)), 980px);
   }
 
   /* see the map through the timeline */

@@ -107,3 +107,70 @@ export function formatClock(ms, decimals = 1) {
   }
   return s;
 }
+
+// ---------------------------------------------------------------- sync editing
+// Times typed by hand, in the platform's "fake UTC" space (local clock time
+// read with UTC getters). Accepted:
+//   "20:47:10"  "20:47:10.250"  "20:47:10:250"  "20:47:10,25"  "20:47"
+//   "2026-06-14 20:47:10.250"  "14.06.2026 20:47:10:250"  "14/06/2026 20:47"
+// Without a date, the day is taken from refMs (the video's chronolocation):
+// the day before / same day / day after, whichever is closest to refMs
+// (a clip filmed around midnight).
+// Returns ms, or NaN if the text is not a time.
+export function parseTimeInput(text, refMs) {
+  const s = String(text || "").trim();
+  if (!s) return NaN;
+  let y, mo, d;
+  let rest = s;
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T]+(.*)$/);
+  if (m) {
+    [y, mo, d] = [+m[1], +m[2], +m[3]];
+    rest = m[4];
+  } else if ((m = s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})[ T]+(.*)$/))) {
+    [d, mo, y] = [+m[1], +m[2], +m[3]];
+    rest = m[4];
+  }
+  // hh:mm[:ss][(.|,|:)fraction]
+  const t = rest.trim().match(/^(\d{1,2})[:hH](\d{1,2})(?::(\d{1,2})(?:[.,:](\d{1,3}))?)?$/);
+  if (!t) return NaN;
+  const hh = +t[1];
+  const mm = +t[2];
+  const ss = t[3] !== undefined ? +t[3] : 0;
+  // "5" -> 500 ms, "25" -> 250 ms, "250" -> 250 ms
+  const ms = t[4] !== undefined ? Math.round(+("0." + t[4]) * 1000) : 0;
+  if (hh > 23 || mm > 59 || ss > 59) return NaN;
+  const tod = ((hh * 60 + mm) * 60 + ss) * 1000 + ms;
+  if (y !== undefined) {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return NaN;
+    return Date.UTC(y, mo - 1, d) + tod;
+  }
+  if (!Number.isFinite(refMs)) return NaN;
+  const day = Math.floor(refMs / 86400000) * 86400000;
+  let best = NaN;
+  for (const k of [-1, 0, 1]) {
+    const c = day + k * 86400000 + tod;
+    if (!Number.isFinite(best) || Math.abs(c - refMs) < Math.abs(best - refMs)) best = c;
+  }
+  return best;
+}
+
+// "Sync offset (s)" that makes the video start at `startMs`, given the
+// chronolocation written in the sheet (start_raw). Rounded to the ms.
+export function offsetForStart(startMs, startRawMs) {
+  return Math.round(startMs - startRawMs) / 1000;
+}
+
+// Offset of video B after aligning a moment marked in both videos:
+// markA / markB are absolute (platform) times where the same event is seen,
+// with the CURRENT placement of each video. A (master) does not move.
+export function offsetAfterAlign(offsetB, markA, markB) {
+  return Math.round(offsetB * 1000 + (markA - markB)) / 1000;
+}
+
+// Full date + time with ms (for the start-time field)
+export function formatDateTime(ms) {
+  if (!Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  const pad = (n, w = 2) => String(n).padStart(w, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${formatClock(ms, 3)}`;
+}
