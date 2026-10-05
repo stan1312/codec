@@ -27,15 +27,17 @@ function set(uar, v) {
 export function requestWaveforms(media, cfg, localFiles) {
   const have = get(waveforms);
   for (const m of media) {
-    if (!m || have[m.UAR] || queue.some((q) => q.uar === m.UAR)) continue;
+    if (!m || queue.some((q) => q.uar === m.UAR)) continue;
+    // known, except "file not loaded yet" (retried once the file is selected)
+    if (have[m.UAR] && !(have[m.UAR].status === "error" && have[m.UAR].missing)) continue;
     const src = mediaSource(m, cfg, localFiles);
     if (!src) {
-      set(m.UAR, { status: "error", error: "fichier non chargé" });
+      if (!have[m.UAR]) set(m.UAR, { status: "error", error: "fichier non chargé", missing: true });
       continue;
     }
     const len = m.start instanceof Date ? (new Date(m.end).getTime() - m.start.getTime()) / 1000 : NaN;
     queue.push({ uar: m.UAR, src, len });
-    set(m.UAR, { status: "queued" });
+    set(m.UAR, { status: "queued", missing: false, error: "" });
   }
   run();
 }
