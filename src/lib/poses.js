@@ -32,8 +32,10 @@ export function poseOf(medium, track, time, override) {
     if (!Number.isFinite(o.lat) || !Number.isFinite(o.lon)) return null;
     const r = relativeAt(track, t);
     if (!Number.isFinite(o.bearing)) {
-      // no bearing yet: the path cannot be oriented, show the start only
-      return { lat: o.lat, lon: o.lon, bearing: NaN, fov: o.fov, active, relative: true, unoriented: true };
+      // no bearing yet: follow the path with a PROVISIONAL orientation (north),
+      // without a cone (the direction is unknown)
+      const p = projectRelative({ ...o, bearing: 0 }, r);
+      return { lat: p.lat, lon: p.lon, bearing: NaN, fov: o.fov, active, relative: true, unoriented: true };
     }
     const p = projectRelative(o, r);
     return { ...p, fov: o.fov, active, relative: true };
@@ -60,13 +62,29 @@ export function pathOf(medium, track, override) {
   if (!track || track.length < 2) return null;
   if (track[0].relative) {
     const o = originOf(medium, override);
-    if (![o.lat, o.lon, o.bearing].every(Number.isFinite)) return null;
+    if (![o.lat, o.lon].every(Number.isFinite)) return null;
+    // no bearing yet: provisional orientation (north), see isOriented()
+    if (!Number.isFinite(o.bearing)) o.bearing = 0;
     return track.map((p) => {
       const q = projectRelative(o, p);
       return [q.lon, q.lat];
     });
   }
   return track.map((p) => [p.lon, p.lat]);
+}
+
+// a relative path needs the bearing of the first image to be oriented
+export function isOriented(medium, track, override) {
+  if (!track || !track.length || !track[0].relative) return true;
+  return Number.isFinite(originOf(medium, override).bearing);
+}
+
+// short description of a trajectory for the interface
+export function trackSummary(track) {
+  if (!track || track.length < 2) return null;
+  let len = 0;
+  if (track[0].relative) for (let i = 1; i < track.length; i++) len += Math.hypot(track[i].x - track[i - 1].x, track[i].y - track[i - 1].y);
+  return { points: track.length, length: len, from: track[0].t, to: track[track.length - 1].t };
 }
 
 // ---- editing from a click on the map ----
