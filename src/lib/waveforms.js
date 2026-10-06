@@ -11,7 +11,9 @@ export const waves_on = writable(false);
 // where to read a medium from (same rule as the video player)
 export function mediaSource(medium, cfg, localFiles) {
   if (!medium) return null;
-  if (String(cfg["Source of media files"] || "").includes("local")) return (localFiles && localFiles[medium.UAR]) || null;
+  // a file chosen on this computer always wins (works in both modes)
+  if (localFiles && localFiles[medium.UAR]) return localFiles[medium.UAR];
+  if (String(cfg["Source of media files"] || "").includes("local")) return null;
   const url = medium[cfg["Title of column used for url"]];
   return url ? String(url) : null;
 }
