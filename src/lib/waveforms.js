@@ -50,22 +50,37 @@ export function retryWaveform(uar) {
   });
 }
 
+// Above this size, decoding the whole file in the browser can exhaust memory
+// (the file AND the decoded sound are held at once): use playback copies.
+const MAX_BYTES = 700 * 1024 * 1024;
+
 async function run() {
   if (running) return;
   running = true;
   while (queue.length) {
     const { uar, src, len } = queue.shift();
+    if (typeof src !== "string" && src && src.size > MAX_BYTES) {
+      set(uar, { status: "error", error: `fichier trop lourd (${Math.round(src.size / 1048576)} Mo) : utilisez la copie de lecture` });
+      continue;
+    }
     set(uar, { status: "loading" });
     try {
       const { env, rate, duration } = await decodeEnvelope(src);
+      if (!env || !env.length) throw new Error("no audio");
       // the timeline bar lasts `len` s (duration column): draw exactly that span
       const span = Number.isFinite(len) && len > 0 ? len : duration;
       const url = waveformDataURL(env, { width: 900, height: 32, color: "rgba(0,0,0,0.8)", from: 0, to: Math.round(span * rate) });
       set(uar, { status: "ok", env, rate, duration, url });
     } catch (e) {
       console.log("waveform", uar, e);
-      set(uar, { status: "error", error: /fetch|network|cors/i.test(String(e)) ? "fichier inaccessible (lien)" : "pas de son lisible" });
+      const m = String((e && (e.message || e.name)) || e);
+      let error = "pas de piste son lisible";
+      if (/fetch|network|cors|load failed/i.test(m)) error = "fichier inaccessible (lien)";
+      else if (/memory|allocation|range/i.test(m)) error = "mémoire insuffisante : utilisez la copie de lecture";
+      set(uar, { status: "error", error });
     }
+    // let the page breathe between two files
+    await new Promise((r) => setTimeout(r, 50));
   }
   running = false;
 }
@@ -76,6 +91,7 @@ export function waveCounts(s) {
   return {
     ok: v.filter((x) => x.status === "ok").length,
     busy: v.filter((x) => x.status === "loading" || x.status === "queued").length,
-    err: v.filter((x) => x.status === "error").length,
+    err: v.filter((x) => x.status === "error" && !x.missing).length,
+    missing: v.filter((x) => x.status === "error" && x.missing).length,
   };
 }
