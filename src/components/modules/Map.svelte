@@ -12,7 +12,7 @@
     sheet_refresh,
   } from "../../stores/store";
   import { conePolygon } from "../../lib/geo";
-  import { computePoses, pathOf, originOf, bearingFromClick, positionFromClick } from "../../lib/poses";
+  import { computePoses, pathOf, originOf, bearingFromClick, positionFromClick, isOriented, trackSummary } from "../../lib/poses";
   import { cfgGet } from "../../lib/columns";
   import { sheetWrite, friendlyError } from "../../lib/sheetClient";
   const { NavigationControl, ScaleControl } = controls;
@@ -40,11 +40,12 @@
     const default_fov = cfg_num("Default field of view (deg)", 60);
     const cones = [];
     const paths = [];
+    const points = [];
     for (const [UAR, pose] of Object.entries(poses)) {
       const medium = $media_store_filtered[UAR];
       const selected =
         UAR === edit_uar || $ui_store.media_in_view.includes(UAR) || $ui_store.media_hovered.includes(UAR);
-      if (Number.isFinite(pose.bearing)) {
+      if (Number.isFinite(pose.bearing) && !pose.unoriented) {
         const fov = Number.isFinite(pose.fov) ? pose.fov : default_fov;
         cones.push({
           type: "Feature",
@@ -52,18 +53,24 @@
           geometry: { type: "Polygon", coordinates: [conePolygon(pose.lat, pose.lon, pose.bearing, fov, length)] },
         });
       }
-      const coords = medium && pathOf(medium, $trajectories_store[UAR], $local_overrides[UAR]);
+      const track = $trajectories_store[UAR];
+      const coords = medium && pathOf(medium, track, $local_overrides[UAR]);
       if (coords) {
+        const oriented = isOriented(medium, track, $local_overrides[UAR]);
         paths.push({
           type: "Feature",
-          properties: { UAR, active: pose.active, selected },
+          properties: { UAR, active: pose.active, selected, oriented },
           geometry: { type: "LineString", coordinates: coords },
         });
+        // start of the path, and where the camera is at the cursor time
+        points.push({ type: "Feature", properties: { kind: "start", oriented, selected }, geometry: { type: "Point", coordinates: coords[0] } });
+        points.push({ type: "Feature", properties: { kind: "now", oriented, selected, active: pose.active }, geometry: { type: "Point", coordinates: [pose.lon, pose.lat] } });
       }
     }
     return {
       cones: { type: "FeatureCollection", features: cones },
       paths: { type: "FeatureCollection", features: paths },
+      points: { type: "FeatureCollection", features: points },
     };
   }
 
@@ -72,15 +79,17 @@
     const empty = { type: "FeatureCollection", features: [] };
     mapObj.addSource("codec-paths", { type: "geojson", data: empty });
     mapObj.addSource("codec-cones", { type: "geojson", data: empty });
+    mapObj.addSource("codec-points", { type: "geojson", data: empty });
+    // trajectories: red when oriented, orange while the first-image direction is not set
     mapObj.addLayer({
       id: "codec-paths",
       type: "line",
       source: "codec-paths",
+      layout: { "line-join": "round", "line-cap": "round" },
       paint: {
-        "line-color": "#d90c1e",
-        "line-width": ["case", ["get", "selected"], 1.5, 1],
-        "line-opacity": ["case", ["get", "selected"], 1, 0.6],
-        "line-dasharray": [2, 1],
+        "line-color": ["case", ["get", "oriented"], "#ff1a2e", "#ffa000"],
+        "line-width": ["case", ["get", "selected"], 3.5, 2.2],
+        "line-opacity": ["case", ["get", "selected"], 1, 0.75],
       },
     });
     mapObj.addLayer({
@@ -109,6 +118,17 @@
         "line-opacity": ["case", ["get", "active"], 1, 0.6],
       },
     });
+    mapObj.addLayer({
+      id: "codec-points",
+      type: "circle",
+      source: "codec-points",
+      paint: {
+        "circle-radius": ["case", ["==", ["get", "kind"], "now"], ["case", ["get", "selected"], 6, 4.5], 3],
+        "circle-color": ["case", ["==", ["get", "kind"], "start"], "#ffffff", ["get", "oriented"], "#ff1a2e", "#ffa000"],
+        "circle-stroke-color": "#000000",
+        "circle-stroke-width": 1,
+      },
+    });
     layers_ready = true;
     schedule_update();
   }
@@ -125,9 +145,10 @@
     update_scheduled = true;
     requestAnimationFrame(() => {
       update_scheduled = false;
-      const { cones, paths } = build_features();
+      const { cones, paths, points } = build_features();
       mapObj.getSource("codec-cones")?.setData(cones);
       mapObj.getSource("codec-paths")?.setData(paths);
+      mapObj.getSource("codec-points")?.setData(points);
     });
   }
 
@@ -144,6 +165,7 @@
   $: edit_medium = edit_uar ? $media_store_filtered[edit_uar] : null;
   $: edit_origin = edit_medium ? originOf(edit_medium, $local_overrides[edit_uar]) : null;
   $: if (!edit_uar) edit_mode = null;
+  $: edit_track_info = edit_uar ? trackSummary($trajectories_store[edit_uar]) : null;
   $: if (mapObj) mapObj.getCanvas().style.cursor = edit_mode ? "crosshair" : "";
 
   function set_override(uar, values) {
@@ -262,7 +284,13 @@
           Cliquez sur la carte où se trouve la caméra à l'image affichée.
         {:else}
           cap {Number.isFinite(edit_origin?.bearing) ? edit_origin.bearing + "°" : "non défini"}
-          {#if $trajectories_store[edit_uar]}· trajectoire {$trajectories_store[edit_uar][0].relative ? "relative" : "absolue"}{/if}
+          {#if edit_track_info}
+            <br />trajectoire : {edit_track_info.points} points{edit_track_info.length ? `, ${edit_track_info.length.toFixed(0)} m` : ""}
+            ({edit_track_info.from.toFixed(0)}–{edit_track_info.to.toFixed(0)} s)
+            {#if !Number.isFinite(edit_origin?.bearing)}<br /><span class="ce_warn"
+                >orientation provisoire (orange) : cliquez « direction » puis là où regarde la caméra</span
+              >{/if}
+          {/if}
         {/if}
       </div>
       {#if save_state}<div class="ce_state">{save_state}</div>{/if}
@@ -367,6 +395,9 @@
     width: 8px;
   }
   .ce_info,
+  .ce_warn {
+    color: #ffa000;
+  }
   .ce_state {
     color: #ccc;
     font-size: 11px;
