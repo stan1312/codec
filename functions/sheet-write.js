@@ -202,8 +202,8 @@ async function updateMedia(io, cfg, body) {
 }
 
 async function replaceTrajectory(io, cfg, body) {
-  const tab = cfg["Title of tab with trajectories"];
-  if (!tab) throw Object.assign(new Error("no 'Title of tab with trajectories' in Platform config"), { status: 400 });
+  // same default as the reading side (sheet-all.js / columns.js)
+  const tab = cfg["Title of tab with trajectories"] || "trajectories";
   if (!(await io.hasTab(tab))) {
     if (!io.createTab) throw Object.assign(new Error(`create a tab named '${tab}' first`), { status: 400 });
     await io.createTab(tab, ["UAR", "t", "x", "y", "heading_rel", "quality"]);
