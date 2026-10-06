@@ -1,119 +1,89 @@
 <script>
-  // "Synchroniser 2 vidéos": the master does not move, the other video is
-  // shifted so that the same moment (marked on the image or on the sound)
-  // happens at the same time in both. Saved to "Sync offset (s)".
-  import { onMount, tick } from "svelte";
-  import { media_store, ui_store, playback_store, platform_config_store, local_file_store } from "../../stores/store";
-  import { seekTo } from "../../lib/clock";
+  // "Synchroniser 2 vidéos": each video has its own player and its own sound
+  // (independent of the red cursor). Mark the same moment in both, then
+  // "Aligner" — or let "Auto (son)" find the shift. The master never moves;
+  // the other video's "Sync offset (s)" is changed (saved to the sheet).
+  import { media_store, ui_store } from "../../stores/store";
   import { formatClock, offsetAfterAlign } from "../../lib/sync";
-  import { bestLag, drawWaveform } from "../../lib/audio";
+  import { bestLag } from "../../lib/audio";
   import { setSyncOffset, offsetOf, hasChrono, sync_panel_open, sync_save, undoSync, sync_history } from "../../lib/syncEdit";
-  import { waveforms, requestWaveforms, retryWaveform } from "../../lib/waveforms";
+  import { waveforms } from "../../lib/waveforms";
+  import SyncSide from "./SyncSide.svelte";
 
   $: candidates = Object.values($media_store)
     .filter(hasChrono)
     .sort((a, b) => a.start - b.start);
 
-  // defaults: the two last opened videos, otherwise the first two
+  // defaults: the two last opened videos
   let uarA = "";
   let uarB = "";
-  $: if (!uarA || !uarB) {
+  let inited = false;
+  $: if (!inited && candidates.length) {
     const open = $ui_store.media_in_view.filter((u) => candidates.some((m) => m.UAR === u));
-    const pool = [...open.slice(-2), ...candidates.map((m) => m.UAR)].filter((u, i, a) => a.indexOf(u) === i);
-    if (!uarA) uarA = pool[0] || "";
-    if (!uarB) uarB = pool.find((u) => u !== uarA) || "";
+    uarA = open[open.length - 2] || open[0] || "";
+    uarB = open.length > 1 ? open[open.length - 1] : "";
+    inited = true;
   }
-  $: A = $media_store[uarA];
-  $: B = $media_store[uarB];
-  $: if (uarA === uarB) uarB = "";
+  $: A = uarA ? $media_store[uarA] : null;
+  $: B = uarB && uarB !== uarA ? $media_store[uarB] : null;
+
+  let markA = null;
+  let markB = null;
+  let videoA;
+  let videoB;
+  let proposal = null;
+  let msg = "";
+
   function swap() {
     [uarA, uarB] = [uarB, uarA];
     [markA, markB] = [markB, markA];
     proposal = null;
   }
+  const resetA = () => ((markA = null), (proposal = null), (msg = ""));
+  const resetB = () => ((markB = null), (proposal = null), (msg = ""));
 
-  // the sound of both videos
-  $: if (A || B) requestWaveforms([A, B].filter(Boolean), $platform_config_store, $local_file_store);
-  $: wA = A && $waveforms[A.UAR];
-  $: wB = B && $waveforms[B.UAR];
-
-  // ---- visible window (absolute ms), centred on the red cursor ----
-  const spans = [4, 10, 20, 60, 180, 600];
-  let span = 20; // seconds
-  let center = NaN;
-  $: if (Number.isFinite($playback_store.time)) center = $playback_store.time;
-  $: if (!Number.isFinite(center) && A) center = A.start.getTime();
-  $: w0 = center - (span * 1000) / 2;
-  $: w1 = center + (span * 1000) / 2;
-
-  // ---- marks: media time (s) inside each video, so a mark follows its video ----
-  let markA = null;
-  let markB = null;
-  $: absA = A && markA !== null ? A.start.getTime() + markA * 1000 : null;
-  $: absB = B && markB !== null ? B.start.getTime() + markB * 1000 : null;
-
-  function videoEl(uar) {
-    const el = document.getElementById(uar);
-    return el ? el.querySelector("video") : null;
-  }
-  // mark the frame currently shown by the video (or at the cursor if it is not open)
-  function markFrame(which) {
-    const m = which === "A" ? A : B;
-    if (!m) return;
-    const v = videoEl(m.UAR);
-    const t = v ? v.currentTime : ($playback_store.time - m.start.getTime()) / 1000;
-    if (which === "A") markA = t;
-    else markB = t;
-  }
-  function stepFrame(which, d) {
-    const m = which === "A" ? A : B;
-    const v = m && videoEl(m.UAR);
-    if (v) v.currentTime = Math.max(0, v.currentTime + d);
-    else seekTo($playback_store.time + d * 1000);
-  }
-  function openBoth() {
-    const add = [uarA, uarB].filter((u) => u && !$ui_store.media_in_view.includes(u));
-    $ui_store.media_in_view = [...$ui_store.media_in_view, ...add];
-  }
+  // current shift between the two clips: tB = tA + (startA - startB)
+  $: rel = A && B ? (A.start.getTime() - B.start.getTime()) / 1000 : 0;
 
   // ---- align on the marks ----
+  $: shift_marks = A && B && markA !== null && markB !== null ? A.start.getTime() + markA * 1000 - (B.start.getTime() + markB * 1000) : null;
   function align() {
-    if (absA === null || absB === null || !B) return;
-    setSyncOffset(B.UAR, offsetAfterAlign(offsetOf(B), absA, absB));
+    if (shift_marks === null) return;
+    setSyncOffset(B.UAR, offsetAfterAlign(offsetOf(B), 0, -shift_marks));
     proposal = null;
+    msg = `${B.UAR} décalée de ${fmt(shift_marks / 1000)}`;
   }
 
-  // ---- automatic: cross-correlation of the sound ----
-  let proposal = null; // { lag, score, second, uarA, uarB }
-  let auto_msg = "";
-  function auto() {
-    auto_msg = "";
+  // ---- automatic, by sound ----
+  const ranges = [
+    [2, "±2 s"],
+    [20, "±20 s"],
+    [120, "±2 min"],
+  ];
+  let range = 20;
+  $: wA = A && $waveforms[A.UAR];
+  $: wB = B && $waveforms[B.UAR];
+  $: sound_ok = wA && wB && wA.status === "ok" && wB.status === "ok";
+  let busy = false;
+  async function auto() {
+    msg = "";
     proposal = null;
-    if (!A || !B || !wA || !wB || wA.status !== "ok" || wB.status !== "ok") {
-      auto_msg = "le son des deux vidéos doit être chargé";
-      return;
-    }
-    const a0 = A.start.getTime();
-    const bStart = (B.start.getTime() - a0) / 1000;
-    let center_lag = 0;
-    let search = Math.min(30, Math.max(3, span / 2));
-    if (absA !== null && absB !== null) {
-      // refine around the marks
-      center_lag = (absA - absB) / 1000;
+    if (!sound_ok) return;
+    busy = true;
+    await new Promise((r) => setTimeout(r, 20)); // let the button show "…"
+    let center = 0;
+    let search = range;
+    if (shift_marks !== null) {
+      center = shift_marks / 1000; // refine around the marks
       search = 1.5;
     }
-    const r = bestLag(wA.env, wB.env, wA.rate, {
-      aStart: 0,
-      bStart,
-      center: center_lag,
-      search,
-      window: [(w0 - a0) / 1000, (w1 - a0) / 1000],
-    });
+    const r = bestLag(wA.env, wB.env, wA.rate, { aStart: 0, bStart: -rel, center, search });
+    busy = false;
     if (!(r.score > 0)) {
-      auto_msg = "pas de son commun dans la fenêtre : élargissez-la ou placez le curseur sur un moment fort";
+      msg = "aucun son commun trouvé : posez un repère dans chaque vidéo ou élargissez la recherche";
       return;
     }
-    proposal = { lag: r.lag, score: r.score, second: r.second, uarA, uarB };
+    proposal = { lag: r.lag, score: r.score, second: r.second };
   }
   $: quality = proposal
     ? proposal.score > 0.35 && proposal.score > 1.4 * proposal.second
@@ -125,257 +95,94 @@
   function applyProposal() {
     if (!proposal || !B) return;
     setSyncOffset(B.UAR, offsetOf(B) + proposal.lag);
+    msg = `${B.UAR} décalée de ${fmt(proposal.lag)}`;
     proposal = null;
   }
 
-  // ---- drawing ----
-  let cA;
-  let cB;
-  let ruler;
-  const x_of = (t, W) => ((t - w0) / (w1 - w0)) * W;
-  const t_of = (x, W) => w0 + (x / W) * (w1 - w0);
-
-  function drawStrip(canvas, m, w, mark, otherAbs, color) {
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = Math.max(10, canvas.clientWidth);
-    const H = canvas.clientHeight;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    const g = canvas.getContext("2d");
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H);
-    if (!m) return;
-    const s = m.start.getTime();
-    const e = new Date(m.end).getTime();
-    // extent of the video
-    const xs = Math.max(0, x_of(s, W));
-    const xe = Math.min(W, x_of(e, W));
-    if (xe > xs) {
-      g.fillStyle = "rgba(255,255,255,0.08)";
-      g.fillRect(xs, 0, xe - xs, H);
-    }
-    if (w && w.status === "ok") {
-      const from = ((w0 - s) / 1000) * w.rate;
-      const to = ((w1 - s) / 1000) * w.rate;
-      drawWaveform(g, w.env, { width: W, height: H, color, from, to });
-    }
-    // the other video's mark (where this one should land)
-    if (otherAbs !== null) {
-      const x = x_of(otherAbs, W);
-      g.strokeStyle = "rgba(255,255,255,0.5)";
-      g.setLineDash([3, 3]);
-      g.beginPath();
-      g.moveTo(x + 0.5, 0);
-      g.lineTo(x + 0.5, H);
-      g.stroke();
-      g.setLineDash([]);
-    }
-    // this video's mark
-    if (mark !== null) {
-      const x = x_of(s + mark * 1000, W);
-      g.fillStyle = "#ffd400";
-      g.fillRect(x - 1, 0, 2, H);
-      g.beginPath();
-      g.moveTo(x - 5, 0);
-      g.lineTo(x + 5, 0);
-      g.lineTo(x, 6);
-      g.fill();
-    }
-    // red cursor
-    const xp = x_of($playback_store.time, W);
-    g.fillStyle = "#ff1a2e";
-    g.fillRect(xp - 0.5, 0, 1.5, H);
+  // ---- play both together (with the current or the proposed alignment) ----
+  function together(extra = 0) {
+    if (!videoA || !videoB) return;
+    const tA = markA !== null ? Math.max(0, markA - 2) : videoA.currentTime;
+    videoA.currentTime = tA;
+    videoB.currentTime = Math.max(0, tA + rel - extra);
+    videoA.muted = false;
+    videoB.muted = true;
+    Promise.all([videoA.play(), videoB.play()]).catch(() => {});
+  }
+  function stopBoth() {
+    videoA?.pause();
+    videoB?.pause();
   }
 
-  function drawRuler() {
-    if (!ruler) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = Math.max(10, ruler.clientWidth);
-    const H = ruler.clientHeight;
-    ruler.width = W * dpr;
-    ruler.height = H * dpr;
-    const g = ruler.getContext("2d");
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, W, H);
-    const steps = [100, 200, 500, 1000, 2000, 5000, 10000, 30000, 60000, 120000];
-    const step = steps.find((st) => (W / ((w1 - w0) / st)) > 70) || 300000;
-    g.fillStyle = "#999";
-    g.font = "10px monospace";
-    for (let t = Math.ceil(w0 / step) * step; t <= w1; t += step) {
-      const x = x_of(t, W);
-      g.fillRect(x, 0, 1, 4);
-      g.fillText(formatClock(t, step < 1000 ? 1 : 0), x + 2, H - 2);
-    }
-  }
-
-  $: {
-    // redraw on any change
-    A, B, wA, wB, markA, markB, w0, w1, $playback_store.time;
-    tick().then(() => {
-      drawStrip(cA, A, wA, markA, absB, "rgba(255,255,255,0.85)");
-      drawStrip(cB, B, wB, markB, absA, "rgba(120,200,255,0.9)");
-      drawRuler();
-    });
-  }
-
-  function clickStrip(e, which) {
-    const m = which === "A" ? A : B;
-    if (!m) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    const t = t_of(e.clientX - r.left, r.width);
-    const media_t = (t - m.start.getTime()) / 1000;
-    if (which === "A") markA = media_t;
-    else markB = media_t;
-  }
-  // wheel: move the window (moves the red cursor); ctrl/alt + wheel: zoom
-  function wheel(e) {
-    e.preventDefault();
-    if (e.ctrlKey || e.altKey) {
-      const i = spans.indexOf(span);
-      span = spans[Math.max(0, Math.min(spans.length - 1, i + (e.deltaY > 0 ? 1 : -1)))];
-    } else {
-      const d = (e.deltaX || e.deltaY) / 400;
-      seekTo($playback_store.time + d * span * 1000 * 0.25);
-    }
-  }
-
-  const fmtOff = (x) => (x >= 0 ? "+" : "") + x.toFixed(3) + " s";
-  const waveState = (w) =>
-    !w ? "" : w.status === "ok" ? "" : w.status === "error" ? "⚠ " + w.error : "son en cours de chargement…";
-
-  let resizeObs;
-  let root;
-  onMount(() => {
-    resizeObs = new ResizeObserver(() => {
-      drawStrip(cA, A, wA, markA, absB, "rgba(255,255,255,0.85)");
-      drawStrip(cB, B, wB, markB, absA, "rgba(120,200,255,0.9)");
-      drawRuler();
-    });
-    resizeObs.observe(root);
-    return () => resizeObs.disconnect();
-  });
+  const fmt = (x) => (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(3) + " s";
 </script>
 
-<div class="panel" bind:this={root} on:pointerdown|stopPropagation>
+<div class="panel" on:pointerdown|stopPropagation on:keydown|stopPropagation>
   <div class="head">
     <strong>Synchroniser 2 vidéos</strong>
-    <span class="help">
-      1. maître = ne bouge pas · 2. marquez le <b>même moment</b> dans les deux (clic sur l'onde, ou « repère = image ») · 3. <b>Aligner</b>,
-      ou <b>Auto (son)</b>
-    </span>
+    <span class="help"
+      >Les deux lecteurs sont indépendants du curseur rouge. Amenez chaque vidéo sur <b>le même moment</b> (image ou pic de son),
+      cliquez <b>📍 marquer</b> des deux côtés, puis <b>Aligner</b>. Ou <b>Auto (son)</b>.</span
+    >
     <button class="close" title="Fermer" on:click={() => ($sync_panel_open = false)}>✕</button>
   </div>
 
   {#if candidates.length < 2}
     <p class="empty">Il faut au moins deux vidéos avec une heure de captation.</p>
   {:else}
-    <div class="rows">
-      <!-- master -->
-      <div class="row">
-        <div class="side">
-          <span class="tag master">MAÎTRE</span>
-          <select bind:value={uarA} on:change={() => ((markA = null), (proposal = null))}>
-            {#each candidates as m}<option value={m.UAR}>{m.UAR}</option>{/each}
-          </select>
-          {#if A}
-            <div class="info">début {formatClock(A.start.getTime(), 3)}</div>
-            <div class="btns">
-              <button title="Image précédente (1/25 s)" on:click={() => stepFrame("A", -0.04)}>◀</button>
-              <button title="Le repère jaune = l'image affichée dans cette vidéo (ou au curseur si elle n'est pas ouverte)" on:click={() => markFrame("A")}
-                >repère = image</button
-              >
-              <button title="Image suivante (1/25 s)" on:click={() => stepFrame("A", 0.04)}>▶</button>
-            </div>
-            {#if markA !== null}<div class="info mark">repère {formatClock(absA, 3)}</div>{/if}
-          {/if}
-        </div>
-        <div class="stripwrap">
-          <canvas bind:this={cA} class="strip" on:click={(e) => clickStrip(e, "A")} on:wheel={wheel} />
-          {#if waveState(wA)}<span class="wstate">{waveState(wA)}
-              {#if wA.status === "error"}<button on:click={() => retryWaveform(uarA)}>réessayer</button>{/if}</span
-            >{/if}
-        </div>
-      </div>
-
-      <div class="row rulerrow">
-        <div class="side">
-          <button class="swap" title="Échanger maître et vidéo à décaler" on:click={swap}>⇅ échanger</button>
-        </div>
-        <canvas bind:this={ruler} class="ruler" on:wheel={wheel} />
-      </div>
-
-      <!-- shifted -->
-      <div class="row">
-        <div class="side">
-          <span class="tag moving">À DÉCALER</span>
-          <select bind:value={uarB} on:change={() => ((markB = null), (proposal = null))}>
-            <option value="" disabled>choisir…</option>
-            {#each candidates.filter((m) => m.UAR !== uarA) as m}<option value={m.UAR}>{m.UAR}</option>{/each}
-          </select>
-          {#if B}
-            <div class="info">début {formatClock(B.start.getTime(), 3)} ({fmtOff(offsetOf(B))})</div>
-            <div class="btns">
-              <button title="Image précédente (1/25 s)" on:click={() => stepFrame("B", -0.04)}>◀</button>
-              <button title="Le repère jaune = l'image affichée dans cette vidéo (ou au curseur si elle n'est pas ouverte)" on:click={() => markFrame("B")}
-                >repère = image</button
-              >
-              <button title="Image suivante (1/25 s)" on:click={() => stepFrame("B", 0.04)}>▶</button>
-            </div>
-            {#if markB !== null}<div class="info mark">repère {formatClock(absB, 3)}</div>{/if}
-          {/if}
-        </div>
-        <div class="stripwrap">
-          <canvas bind:this={cB} class="strip" on:click={(e) => clickStrip(e, "B")} on:wheel={wheel} />
-          {#if waveState(wB)}<span class="wstate">{waveState(wB)}
-              {#if wB.status === "error"}<button on:click={() => retryWaveform(uarB)}>réessayer</button>{/if}</span
-            >{/if}
-        </div>
-      </div>
+    <div class="sides">
+      <SyncSide role="master" {candidates} exclude={uarB} bind:uar={uarA} medium={A} bind:mark={markA} bind:video={videoA} on:change={resetA} on:swap={swap} />
+      <SyncSide role="moving" {candidates} exclude={uarA} bind:uar={uarB} medium={B} bind:mark={markB} bind:video={videoB} on:change={resetB} />
     </div>
 
-    <div class="actions">
-      <label
-        >fenêtre
-        <select bind:value={span}>
-          {#each spans as s}<option value={s}>{s < 60 ? s + " s" : s / 60 + " min"}</option>{/each}
-        </select></label
-      >
-      <button title="Ouvrir les deux vidéos à droite" on:click={openBoth}>ouvrir les vidéos</button>
-      <span class="grow" />
-      <button
-        class="main"
-        disabled={absA === null || absB === null || !B}
-        title="Décale la vidéo à décaler pour que son repère tombe sur celui du maître"
-        on:click={align}
-        >Aligner{absA !== null && absB !== null ? ` (${fmtOff((absA - absB) / 1000)})` : ""}</button
-      >
-      <button
-        class="main"
-        disabled={!B || !wA || !wB || wA.status !== "ok" || wB.status !== "ok"}
-        title={absA !== null && absB !== null
-          ? "Affine au son autour des repères (±1,5 s)"
-          : "Cherche le décalage qui superpose le mieux les sons dans la fenêtre affichée"}
-        on:click={auto}>Auto (son)</button
-      >
-      <button disabled={!$sync_history.length} title="Annuler la dernière modification de synchro" on:click={undoSync}>↶ annuler</button>
-      {#if B && $sync_save[B.UAR]}<span class="msg">{$sync_save[B.UAR]}</span>{/if}
-    </div>
-    {#if proposal}
-      <div class="proposal {quality}">
-        Son : décaler <b>{B?.UAR}</b> de <b>{fmtOff(proposal.lag)}</b> — correspondance {quality}
-        ({proposal.score.toFixed(2)}, 2e pic {proposal.second.toFixed(2)})
-        <button class="main" on:click={applyProposal}>Appliquer</button>
-        <button on:click={() => (proposal = null)}>ignorer</button>
+    {#if A && B}
+      <div class="actions">
+        <span class="state"
+          >actuellement : {B.UAR} commence à <b>{formatClock(B.start.getTime(), 3)}</b> ({fmt(offsetOf(B))} de décalage)</span
+        >
+        <span class="grow" />
+        <button
+          class="main"
+          disabled={shift_marks === null}
+          title={shift_marks === null ? "Marquez d'abord le même moment dans les deux vidéos" : "Décale la vidéo de droite pour que les deux repères tombent au même instant"}
+          on:click={align}>Aligner les repères{shift_marks !== null ? ` (${fmt(shift_marks / 1000)})` : ""}</button
+        >
+        <button
+          class="main"
+          disabled={!sound_ok || busy}
+          title={!sound_ok ? "Le son des deux vidéos doit être chargé" : shift_marks !== null ? "Affine au son autour des repères (±1,5 s)" : "Cherche le décalage qui superpose les deux sons"}
+          on:click={auto}>{busy ? "recherche…" : "Auto (son)"}</button
+        >
+        {#if shift_marks === null}
+          <select bind:value={range} title="Plage de recherche autour du placement actuel">
+            {#each ranges as [v, l]}<option value={v}>{l}</option>{/each}
+          </select>
+        {/if}
+        <button disabled={!videoA || !videoB} title="Lire les deux vidéos ensemble avec le calage actuel (son du maître)" on:click={() => together(0)}
+          >▶ lire ensemble</button
+        >
+        <button disabled={!videoA || !videoB} on:click={stopBoth}>❚❚</button>
+        <button disabled={!$sync_history.length} title="Annuler la dernière modification de synchro" on:click={undoSync}>↶ annuler</button>
       </div>
+      {#if proposal}
+        <div class="proposal {quality}">
+          Son : décaler <b>{B.UAR}</b> de <b>{fmt(proposal.lag)}</b> — correspondance <b>{quality}</b>
+          <small>({proposal.score.toFixed(2)}, 2e pic {proposal.second.toFixed(2)})</small>
+          <button title="Lire les deux vidéos avec ce décalage, sans l'enregistrer" on:click={() => together(proposal.lag)}>▶ essayer</button>
+          <button class="main" on:click={applyProposal}>Appliquer</button>
+          <button on:click={() => (proposal = null)}>ignorer</button>
+        </div>
+      {/if}
+      {#if msg || $sync_save[B.UAR]}
+        <div class="msg">{msg}{msg && $sync_save[B.UAR] ? " — " : ""}{$sync_save[B.UAR] || ""}</div>
+      {/if}
     {/if}
-    {#if auto_msg}<div class="proposal douteuse">{auto_msg}</div>{/if}
   {/if}
 </div>
 
 <style>
   .panel {
-    background: rgba(0, 0, 0, 0.9);
+    background: rgba(0, 0, 0, 0.92);
     color: #ddd;
     font-size: 11px;
     padding: 6px 8px;
@@ -383,9 +190,9 @@
     border-radius: 4px;
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    width: 100%;
+    gap: 6px;
     box-sizing: border-box;
+    width: 100%;
   }
   .head {
     display: flex;
@@ -404,86 +211,23 @@
   .help b {
     color: #ddd;
   }
-  .close {
-    margin-left: auto;
-  }
-  .rows {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .row {
-    display: flex;
+  .sides {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 6px;
-    align-items: stretch;
-  }
-  .side {
-    width: 170px;
-    flex: 0 0 170px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .tag {
-    font-size: 9px;
-    font-weight: bold;
-    letter-spacing: 0.05em;
-    border-radius: 8px;
-    padding: 0 6px;
-    align-self: flex-start;
-  }
-  .tag.master {
-    background: white;
-    color: black;
-  }
-  .tag.moving {
-    background: #78c8ff;
-    color: black;
-  }
-  .info {
-    font-family: monospace;
-    color: #aaa;
-  }
-  .info.mark {
-    color: #ffd400;
-  }
-  .btns {
-    display: flex;
-    gap: 2px;
-  }
-  .stripwrap {
-    position: relative;
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-  canvas.strip {
-    width: 100%;
-    height: 64px;
-    display: block;
-    background: #0b0b0b;
-    border: 1px solid #2a2a2a;
-    cursor: crosshair;
-  }
-  .rulerrow {
-    align-items: center;
-  }
-  canvas.ruler {
-    flex: 1 1 auto;
-    min-width: 0;
-    height: 16px;
-  }
-  .wstate {
-    position: absolute;
-    left: 6px;
-    top: 4px;
-    color: #ffb000;
-    pointer-events: auto;
   }
   .actions {
     display: flex;
     align-items: center;
     gap: 5px;
     flex-wrap: wrap;
+  }
+  .state {
+    color: #aaa;
+  }
+  .state b {
+    font-family: monospace;
+    color: #78c8ff;
   }
   .grow {
     flex: 1 1 auto;
@@ -494,13 +238,10 @@
     color: white;
     border: 1px solid #444;
     border-radius: 3px;
-    padding: 0 5px;
+    padding: 0 6px;
     font-size: 11px;
-    line-height: 16px;
+    line-height: 18px;
     cursor: pointer;
-  }
-  select {
-    max-width: 170px;
   }
   button.main {
     background: #d90c1e;
@@ -511,19 +252,23 @@
     opacity: 0.35;
     cursor: default;
   }
-  .msg {
-    color: #999;
-  }
   .proposal {
-    padding: 3px 6px;
+    padding: 4px 6px;
     border-radius: 3px;
     background: #1d2a1d;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
   }
   .proposal.moyenne {
     background: #2a271a;
   }
   .proposal.douteuse {
     background: #2a1a1a;
+  }
+  .msg {
+    color: #9c9;
   }
   .empty {
     color: #999;

@@ -99,12 +99,12 @@
     z-index: 8;
     left: var(--gap);
     bottom: calc(var(--timeline-h) + 2 * var(--gap));
-    width: min(calc(100% - min(33%, 560px) - 4 * var(--gap)), 980px);
+    width: min(calc(100% - min(33%, 560px) - 4 * var(--gap)), 1200px);
     max-height: calc(100% - var(--timeline-h) - 4 * var(--gap));
     overflow-y: auto;
   }
   #modules_container.no_media #sync_area {
-    width: min(calc(100% - 2 * var(--gap)), 980px);
+    width: min(calc(100% - 2 * var(--gap)), 1200px);
   }
 
   /* see the map through the timeline */
