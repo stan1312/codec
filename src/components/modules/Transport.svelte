@@ -11,7 +11,7 @@
     requestWaveforms(Object.values($media_store_filtered).filter(hasChrono), $platform_config_store, $local_file_store);
   $: wc = waveCounts($waveforms);
   $: wave_errors = Object.entries($waveforms)
-    .filter(([, w]) => w.status === "error")
+    .filter(([, w]) => w.status === "error" && !w.missing)
     .map(([u, w]) => `${u} : ${w.error}`)
     .join("\n");
 
@@ -71,8 +71,8 @@
     class:on={$waves_on}
     title={"Afficher le son (forme d'onde) dans les barres de la timeline" + (wave_errors ? "\n\nSans onde :\n" + wave_errors : "")}
     on:click={() => ($waves_on = !$waves_on)}
-    >ondes{#if $waves_on && (wc.busy || wc.err)}<small>
-        {wc.busy ? ` ${wc.ok}/${wc.ok + wc.busy}…` : ""}{wc.err ? ` ⚠${wc.err}` : ""}</small
+    >ondes{#if $waves_on && (wc.busy || wc.err || wc.missing)}<small>
+        {wc.busy ? ` ${wc.ok}/${wc.ok + wc.busy}…` : ""}{wc.err ? ` ⚠${wc.err}` : ""}{wc.missing && !wc.busy ? ` (${wc.missing} non chargées)` : ""}</small
       >{/if}</button
   >
   <button class:on={$sync_panel_open} class="two" title="Caler une vidéo sur une autre (image ou son)" on:click={() => ($sync_panel_open = !$sync_panel_open)}

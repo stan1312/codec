@@ -108,24 +108,44 @@
   $: {
     videos = Object.values($media_store_filtered);
     let videos_w_chrono = videos.filter((video) => video.start !== undefined);
-    // waveform drawn inside the bar (toggle "ondes")
-    const wf = $waveforms;
-    const show_waves = $waves_on;
+    // each bar gets a stable class (wf_N) used by the waveform stylesheet below.
+    // NB: no inline "style" here: vis-timeline parses it by splitting on ";"
+    // and ":" and crashes on a data: URL.
     items = new DataSet(
-      videos_w_chrono.map((v) => {
-        const w = show_waves && wf[v.UAR] && wf[v.UAR].url;
-        return w
-          ? {
-              ...v,
-              style: `background-image:url(${w});background-size:100% 100%;background-repeat:no-repeat;`,
-            }
-          : v;
-      }),
+      videos_w_chrono.map((v) => ({ ...v, className: wave_class(v.UAR) + (v.className ? " " + v.className : "") })),
     );
     let view = new DataView(items);
     let viewed_items = view.get();
     main_timeline?.setItems(viewed_items);
     update_timeline_clicked_hovered();
+  }
+
+  // ---- waveforms inside the bars (toggle "ondes"): one stylesheet ----
+  const wave_ids = new Map();
+  function wave_class(uar) {
+    if (!wave_ids.has(uar)) wave_ids.set(uar, wave_ids.size);
+    return "wf_" + wave_ids.get(uar);
+  }
+  let wave_sheet = null;
+  $: {
+    const wf = $waveforms;
+    let css = "";
+    if ($waves_on) {
+      for (const [uar, w] of Object.entries(wf)) {
+        if (w && w.status === "ok" && w.url)
+          css += `#main_timeline.waves .vis-item.${wave_class(uar)}{background-image:url("${w.url}");background-size:100% 100%;background-repeat:no-repeat;}\n`;
+      }
+    }
+    try {
+      if (!wave_sheet) {
+        wave_sheet = document.createElement("style");
+        wave_sheet.id = "codec_waveforms";
+        document.head.appendChild(wave_sheet);
+      }
+      wave_sheet.textContent = css;
+    } catch (e) {
+      console.log("waveform style", e);
+    }
   }
 
   // ---- drag a video along the timeline to re-synchronise it ----
